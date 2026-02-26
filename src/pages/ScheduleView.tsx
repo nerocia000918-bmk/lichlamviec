@@ -79,7 +79,12 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const [editData, setEditData] = useState({ shift_id: 0, task: 'Không', note: '' });
   
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [taskDeptFilter, setTaskDeptFilter] = useState<string>('');
   const [newTask, setNewTask] = useState({ name: '', color: '#4c1d95', text_color: '#ffffff' });
+
+  useEffect(() => {
+    if (user) setTaskDeptFilter(user.department);
+  }, [user]);
 
   const scheduleRef = useRef<HTMLDivElement>(null);
 
@@ -204,14 +209,14 @@ export default function ScheduleView({ user }: { user: User | null }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        department: user.department,
+        department: taskDeptFilter || user.department,
         name: newTask.name,
         color: newTask.color,
         text_color: newTask.text_color
       })
     });
-    setShowTaskForm(false);
     setNewTask({ name: '', color: '#4c1d95', text_color: '#ffffff' });
+    fetchData();
   };
 
   const handleDeleteTask = async (id: number) => {
@@ -220,7 +225,12 @@ export default function ScheduleView({ user }: { user: User | null }) {
   };
 
   const getDeptTasks = (dept: string) => {
-    return tasks.filter(t => t.department === dept || t.department === 'All');
+    if (!dept) return [];
+    const normalizedDept = dept.trim().toLowerCase();
+    return tasks.filter(t => {
+      const tDept = (t.department || '').trim().toLowerCase();
+      return tDept === normalizedDept || tDept === 'all';
+    });
   };
 
   const handleMarkAsSeen = async (annId: number) => {
@@ -1050,7 +1060,11 @@ export default function ScheduleView({ user }: { user: User | null }) {
                   <label className="block text-sm font-medium text-slate-700">Nhiệm vụ đặc biệt</label>
                   {(role === 'Admin' || role === 'Tổ trưởng') && (
                     <button 
-                      onClick={() => setShowTaskForm(true)}
+                      onClick={() => {
+                        const empDept = employees.find(e => e.id === selectedCell.empId)?.department || '';
+                        if (empDept) setTaskDeptFilter(empDept);
+                        setShowTaskForm(true);
+                      }}
                       className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700"
                     >
                       + Quản lý tất cả
@@ -1093,7 +1107,8 @@ export default function ScheduleView({ user }: { user: User | null }) {
                           const name = (e.target as HTMLInputElement).value.trim();
                           if (!name) return;
                           
-                          const dept = employees.find(emp => emp.id === selectedCell.empId)?.department || '';
+                          const emp = employees.find(emp => emp.id === selectedCell.empId);
+                          const dept = emp?.department || '';
                           const res = await fetch('/api/tasks', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1159,64 +1174,106 @@ export default function ScheduleView({ user }: { user: User | null }) {
       {/* Task Management Modal */}
       {showTaskForm && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-slate-800">Quản lý nhiệm vụ - {user?.department}</h3>
-              <button onClick={() => setShowTaskForm(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Quản lý nhiệm vụ</h3>
+                <p className="text-xs text-slate-500">Thiết lập danh sách nhiệm vụ cho từng bộ phận</p>
+              </div>
+              <button onClick={() => setShowTaskForm(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
             </div>
             
-            <div className="p-5 space-y-4">
-              <form onSubmit={handleAddTask} className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
-                <div className="text-sm font-bold text-slate-700">Thêm nhiệm vụ mới</div>
+            <div className="p-5 space-y-6">
+              <div className="space-y-3">
+                <label className="block text-sm font-bold text-slate-700">Chọn bộ phận</label>
+                <div className="flex flex-wrap gap-2">
+                  {['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho', 'All'].map(d => (
+                    <button
+                      key={d}
+                      onClick={() => setTaskDeptFilter(d)}
+                      className={clsx(
+                        "px-3 py-1.5 rounded-xl text-xs font-bold transition-all border",
+                        taskDeptFilter === d ? "bg-indigo-600 text-white border-transparent shadow-md" : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300"
+                      )}
+                    >
+                      {d === 'All' ? 'Tất cả' : d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <form onSubmit={handleAddTask} className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                  <div className="w-1.5 h-4 bg-indigo-500 rounded-full"></div>
+                  Thêm nhiệm vụ cho {taskDeptFilter === 'All' ? 'tất cả bộ phận' : `bộ phận ${taskDeptFilter}`}
+                </div>
                 <input 
                   type="text" 
                   required
                   placeholder="Tên nhiệm vụ (VD: Trực Hotline)"
                   value={newTask.name}
                   onChange={e => setNewTask({...newTask, name: e.target.value})}
-                  className="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   <div className="flex-1">
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Màu nền</label>
-                    <input 
-                      type="color" 
-                      value={newTask.color}
-                      onChange={e => setNewTask({...newTask, color: e.target.value})}
-                      className="w-full h-8 p-0 border-0 rounded cursor-pointer"
-                    />
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1 ml-1">Màu nền</label>
+                    <div className="flex items-center gap-2 p-1.5 bg-white border border-slate-200 rounded-xl">
+                      <input 
+                        type="color" 
+                        value={newTask.color}
+                        onChange={e => setNewTask({...newTask, color: e.target.value})}
+                        className="w-8 h-8 p-0 border-0 rounded-lg cursor-pointer overflow-hidden"
+                      />
+                      <span className="text-[10px] font-mono text-slate-400 uppercase">{newTask.color}</span>
+                    </div>
                   </div>
                   <div className="flex-1">
-                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Màu chữ</label>
-                    <input 
-                      type="color" 
-                      value={newTask.text_color}
-                      onChange={e => setNewTask({...newTask, text_color: e.target.value})}
-                      className="w-full h-8 p-0 border-0 rounded cursor-pointer"
-                    />
+                    <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1 ml-1">Màu chữ</label>
+                    <div className="flex items-center gap-2 p-1.5 bg-white border border-slate-200 rounded-xl">
+                      <input 
+                        type="color" 
+                        value={newTask.text_color}
+                        onChange={e => setNewTask({...newTask, text_color: e.target.value})}
+                        className="w-8 h-8 p-0 border-0 rounded-lg cursor-pointer overflow-hidden"
+                      />
+                      <span className="text-[10px] font-mono text-slate-400 uppercase">{newTask.text_color}</span>
+                    </div>
                   </div>
                 </div>
-                <button type="submit" className="w-full bg-indigo-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors">
+                <button type="submit" className="w-full bg-indigo-600 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all shadow-sm active:scale-[0.98]">
                   Thêm nhiệm vụ
                 </button>
               </form>
-
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                <div className="text-sm font-bold text-slate-700">Danh sách nhiệm vụ hiện tại</div>
-                {getDeptTasks(user?.department || '').map(t => (
-                  <div key={t.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded" style={{ backgroundColor: t.color }}></div>
-                      <span className="text-sm font-medium text-slate-700">{t.name}</span>
-                      {t.department === 'All' && <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">Hệ thống</span>}
-                    </div>
-                    {t.department !== 'All' && (
-                      <button onClick={() => handleDeleteTask(t.id)} className="text-red-400 hover:text-red-600 p-1">
+ 
+              <div className="space-y-3">
+                <div className="text-sm font-bold text-slate-700 flex justify-between items-center">
+                  <span>Nhiệm vụ của {taskDeptFilter === 'All' ? 'Hệ thống' : taskDeptFilter}</span>
+                  <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded-full text-slate-500">{getDeptTasks(taskDeptFilter).length} nhiệm vụ</span>
+                </div>
+                <div className="space-y-2 max-h-[240px] overflow-y-auto pr-1 custom-scrollbar">
+                  {getDeptTasks(taskDeptFilter).map(t => (
+                    <div key={t.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl shadow-sm hover:border-indigo-100 transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold shadow-inner" style={{ backgroundColor: t.color, color: t.text_color }}>
+                          {t.name.substring(0, 2).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="text-sm font-bold text-slate-700">{t.name}</div>
+                          <div className="text-[10px] text-slate-400 uppercase tracking-wider">{t.department === 'All' ? 'Dùng chung' : t.department}</div>
+                        </div>
+                      </div>
+                      <button onClick={() => handleDeleteTask(t.id)} className="text-slate-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg transition-all">
                         <Trash2 className="w-4 h-4" />
                       </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  ))}
+                  {getDeptTasks(taskDeptFilter).length === 0 && (
+                    <div className="text-center py-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-xs text-slate-400">Chưa có nhiệm vụ nào cho bộ phận này</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

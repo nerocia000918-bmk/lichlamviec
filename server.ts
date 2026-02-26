@@ -110,7 +110,11 @@ async function loadFromGoogleSheets() {
         db.prepare('DELETE FROM locked_months').run();
         db.prepare('DELETE FROM announcements').run();
         db.prepare('DELETE FROM leave_requests').run();
-        db.prepare('DELETE FROM tasks').run();
+        // Only delete tasks if we have new ones to replace them with
+        // to prevent wiping defaults if the sheet is missing/empty
+        if (data.tasks && data.tasks.length > 0) {
+          db.prepare('DELETE FROM tasks').run();
+        }
 
         if (data.employees.length > 0) {
           const insertEmp = db.prepare('INSERT INTO employees (id, code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -173,15 +177,35 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.tasks && data.tasks.length > 0) {
+          db.prepare('DELETE FROM tasks').run();
           const insertTask = db.prepare('INSERT INTO tasks (id, department, name, color, text_color) VALUES (?, ?, ?, ?, ?)');
           data.tasks.forEach((t: any) => insertTask.run(t.id, t.department, t.name, t.color, t.text_color));
         }
       })();
+      seedTasks(); // Ensure defaults exist even after sync
       console.log('Successfully loaded data from Google Sheets');
     }
   } catch (err) {
     console.error('Failed to load from Google Sheets:', err);
   }
+}
+
+function seedTasks() {
+  const salesTasks = [
+    { name: 'Trực hotline', color: '#22c55e', text_color: '#ffffff' },
+    { name: 'Trực cửa', color: '#a855f7', text_color: '#ffffff' },
+    { name: 'Vệ sinh', color: '#06b6d4', text_color: '#ffffff' }
+  ];
+
+  salesTasks.forEach(task => {
+    const existing = db.prepare('SELECT id FROM tasks WHERE LOWER(TRIM(department)) = LOWER(?) AND LOWER(TRIM(name)) = LOWER(?)')
+      .get('Bán hàng', task.name);
+      
+    if (!existing) {
+      db.prepare('INSERT INTO tasks (department, name, color, text_color) VALUES (?, ?, ?, ?)')
+        .run('Bán hàng', task.name, task.color, task.text_color);
+    }
+  });
 }
 
 // Initialize DB
@@ -298,29 +322,7 @@ try {
 // Set default password for existing admins
 db.prepare("UPDATE employees SET password = ? WHERE role = 'Admin' AND (password IS NULL OR password = '')").run('1234');
 
-// Seed default tasks for Bán hàng
-const salesTasks = [
-  { name: 'Trực hotline', color: '#22c55e', text_color: '#ffffff' },
-  { name: 'Trực cửa', color: '#a855f7', text_color: '#ffffff' },
-  { name: 'Vệ sinh', color: '#06b6d4', text_color: '#ffffff' }
-];
-
-salesTasks.forEach(task => {
-  const exists = db.prepare('SELECT id FROM tasks WHERE department = ? AND name = ?').get('Bán hàng', task.name);
-  if (!exists) {
-    db.prepare('INSERT INTO tasks (department, name, color, text_color) VALUES (?, ?, ?, ?)').run('Bán hàng', task.name, task.color, task.text_color);
-  }
-});
-
-// Seed initial tasks if empty
-const taskCount = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number };
-if (taskCount.count === 0) {
-  const insertTask = db.prepare('INSERT INTO tasks (department, name, color, text_color) VALUES (?, ?, ?, ?)');
-  // Default tasks for Bán hàng
-  insertTask.run('Bán hàng', 'Trực cửa', '#4c1d95', '#ffffff');
-  insertTask.run('Bán hàng', 'Hotline', '#16a34a', '#ffffff');
-  insertTask.run('Bán hàng', 'Vệ sinh', '#2dd4bf', '#064e3b');
-}
+seedTasks();
 
 try {
   db.exec('ALTER TABLE schedules ADD COLUMN note TEXT');
