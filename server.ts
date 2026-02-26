@@ -103,6 +103,14 @@ async function loadFromGoogleSheets() {
     }
 
     if (data && data.employees) {
+      // SAFETY CHECK: If the incoming data is empty but we have local data, 
+      // do NOT wipe unless it's a confirmed empty state.
+      const localEmpCount = db.prepare('SELECT COUNT(*) as count FROM employees').get() as { count: number };
+      if (data.employees.length === 0 && localEmpCount.count > 0) {
+        console.warn('⚠️ CẢNH BÁO: Dữ liệu từ Google Sheets trống. Hệ thống đã chặn việc xóa dữ liệu cục bộ để bảo vệ an toàn.');
+        return;
+      }
+
       db.transaction(() => {
         db.prepare('DELETE FROM employees').run();
         db.prepare('DELETE FROM shifts').run();
