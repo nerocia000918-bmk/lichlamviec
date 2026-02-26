@@ -116,7 +116,7 @@ function getSheetData(ss, sheetName, columns) {
         if (numericCols.indexOf(columns[j]) !== -1) {
           obj[columns[j]] = (val !== '' && !isNaN(val)) ? Number(val) : val;
         } else {
-          obj[columns[j]] = val;
+          obj[columns[j]] = val.toString();
         }
       }
     }

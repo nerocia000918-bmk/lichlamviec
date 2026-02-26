@@ -136,7 +136,7 @@ async function loadFromGoogleSheets() {
             else if (role.toLowerCase() === 'tổ trưởng') role = 'Tổ trưởng';
             else if (role.toLowerCase() === 'nhân viên') role = 'Nhân viên';
             
-            let password = e.password || '';
+            let password = e.password !== undefined && e.password !== null ? String(e.password) : '';
             if (role === 'Admin' && !password) {
               password = '1234';
             }

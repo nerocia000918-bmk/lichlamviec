@@ -80,7 +80,8 @@ export default function App() {
             setError('Tài khoản Admin yêu cầu mật khẩu!');
             return;
           }
-          if (foundUser.password !== password) {
+          // Use String() to handle cases where password might be stored as a number
+          if (String(foundUser.password) !== String(password)) {
             setError('Mật khẩu không chính xác!');
             return;
           }
