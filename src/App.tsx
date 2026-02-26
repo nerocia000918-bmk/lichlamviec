@@ -58,7 +58,8 @@ export default function App() {
     e.preventDefault();
     setError('');
     
-    if (!loginCode.trim()) {
+    const trimmedCode = loginCode.trim();
+    if (!trimmedCode) {
       setIsGuest(true);
       setShowLogin(false);
       localStorage.setItem('isGuest', 'true');
@@ -67,14 +68,16 @@ export default function App() {
 
     try {
       const res = await fetch('/api/employees');
-      const employees: any[] = await res.json();
-      const foundUser = employees.find(emp => emp.code.trim().toLowerCase() === loginCode.trim().toLowerCase());
+      const allEmployees: any[] = await res.json();
+      setEmployees(allEmployees); // Update local state as well
+      
+      const foundUser = allEmployees.find(emp => emp.code.trim().toLowerCase() === trimmedCode.toLowerCase());
       
       if (foundUser) {
-        // Admin requires password
-        if (foundUser.role.toLowerCase() === 'admin') {
+        const isAdmin = foundUser.role.toLowerCase() === 'admin';
+        if (isAdmin) {
           if (!password) {
-            setError('Admin yêu cầu mật khẩu!');
+            setError('Tài khoản Admin yêu cầu mật khẩu!');
             return;
           }
           if (foundUser.password !== password) {
@@ -94,7 +97,7 @@ export default function App() {
         setShowLogin(false);
         localStorage.setItem('user', JSON.stringify(userWithNormalizedRole));
       } else {
-        setError(`Mã nhân viên "${loginCode}" không tồn tại trong hệ thống! Hãy kiểm tra lại cột code trong Google Sheet.`);
+        setError(`Mã nhân viên "${trimmedCode}" không tồn tại! Vui lòng kiểm tra lại cột "code" trong Google Sheet.`);
       }
     } catch (err) {
       setError('Lỗi kết nối máy chủ.');
@@ -106,11 +109,16 @@ export default function App() {
     setIsGuest(false);
     setShowLogin(true);
     setLoginCode('');
+    setPassword('');
+    setError('');
     localStorage.removeItem('user');
     localStorage.removeItem('isGuest');
   };
 
   const currentRole: Role = user ? user.role : 'Nhân viên';
+
+  const isLoggingInAsAdmin = loginCode.trim().toLowerCase() === 'admin' || 
+    employees?.find(e => e.code.trim().toLowerCase() === loginCode.trim().toLowerCase())?.role.toLowerCase() === 'admin';
 
   if (showLogin) {
     return (
@@ -130,30 +138,40 @@ export default function App() {
               <input 
                 type="text" 
                 value={loginCode}
-                onChange={(e) => setLoginCode(e.target.value)}
+                onChange={(e) => {
+                  setLoginCode(e.target.value);
+                  setError(''); // Clear error when typing
+                }}
                 placeholder="VD: NV001 (Bỏ trống để xem với tư cách Khách)"
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
               />
             </div>
 
-            {loginCode.trim().toLowerCase() === 'admin' || employees?.find(e => e.code.toLowerCase() === loginCode.trim().toLowerCase())?.role.toLowerCase() === 'admin' ? (
+            {isLoggingInAsAdmin && (
               <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                <label className="block text-sm font-medium text-slate-700 mb-1">Mật khẩu (Chỉ dành cho Admin)</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mật khẩu (Dành cho Admin)</label>
                 <input 
                   type="password" 
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mật khẩu mặc định: 1234"
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setError('');
+                  }}
+                  placeholder="Nhập mật khẩu..."
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
                 />
               </div>
-            ) : null}
+            )}
 
-            {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
+                <p className="text-red-600 text-xs font-medium">{error}</p>
+              </div>
+            )}
             
             <button 
               type="submit"
-              className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+              className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm active:scale-[0.98]"
             >
               {loginCode.trim() ? 'Đăng nhập' : 'Vào xem (Khách)'}
             </button>
