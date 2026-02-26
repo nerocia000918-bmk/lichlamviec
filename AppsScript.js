@@ -11,6 +11,11 @@ function getSheetByNameCaseInsensitive(ss, name) {
   return null;
 }
 
+// Hàm này để tránh lỗi khi bạn nhấn nút "Chạy" (Run) trong trình soạn thảo
+function myFunction() {
+  Logger.log("Script đang hoạt động bình thường. Bạn không cần nhấn nút Chạy ở đây. Hãy thực hiện bước 'Triển khai' (Deploy) để lấy link Web App.");
+}
+
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
