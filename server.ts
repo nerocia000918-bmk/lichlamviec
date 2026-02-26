@@ -298,6 +298,20 @@ try {
 // Set default password for existing admins
 db.prepare("UPDATE employees SET password = ? WHERE role = 'Admin' AND (password IS NULL OR password = '')").run('1234');
 
+// Seed default tasks for Bán hàng
+const salesTasks = [
+  { name: 'Trực hotline', color: '#22c55e', text_color: '#ffffff' },
+  { name: 'Trực cửa', color: '#a855f7', text_color: '#ffffff' },
+  { name: 'Vệ sinh', color: '#06b6d4', text_color: '#ffffff' }
+];
+
+salesTasks.forEach(task => {
+  const exists = db.prepare('SELECT id FROM tasks WHERE department = ? AND name = ?').get('Bán hàng', task.name);
+  if (!exists) {
+    db.prepare('INSERT INTO tasks (department, name, color, text_color) VALUES (?, ?, ?, ?)').run('Bán hàng', task.name, task.color, task.text_color);
+  }
+});
+
 // Seed initial tasks if empty
 const taskCount = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number };
 if (taskCount.count === 0) {
