@@ -1,6 +1,6 @@
 function getSheetByNameCaseInsensitive(ss, name) {
   if (!ss) {
-    throw new Error("Không tìm thấy Spreadsheet. Hãy đảm bảo bạn đã mở Apps Script từ menu 'Tiện ích mở rộng' -> 'Apps Script' ngay trong file Google Sheet của bạn.");
+    throw new Error("Không tìm thấy Spreadsheet. Hãy đảm bảo bạn đã mở Apps Script từ menu 'Tiện ích mở rộng' -> 'Apps Script' ngay trong file Google Sheet của bạn. Nếu bạn đang dùng script độc lập, hãy dùng SpreadsheetApp.openById('ID_FILE_SHEET').");
   }
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
@@ -11,22 +11,23 @@ function getSheetByNameCaseInsensitive(ss, name) {
   return null;
 }
 
-// Hàm này để tránh lỗi khi bạn nhấn nút "Chạy" (Run) trong trình soạn thảo
-function myFunction() {
-  Logger.log("Script đang hoạt động bình thường. Bạn không cần nhấn nút Chạy ở đây. Hãy thực hiện bước 'Triển khai' (Deploy) để lấy link Web App.");
+function getSpreadsheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) ss = SpreadsheetApp.getActive();
+  return ss;
 }
 
 function doPost(e) {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (!ss) ss = SpreadsheetApp.getActive();
+    var ss = getSpreadsheet();
+    if (!ss) throw new Error("Không thể kết nối với Google Sheet. Hãy mở script từ menu 'Tiện ích mở rộng' trong file Sheet.");
     
     var params = JSON.parse(e.postData.contents);
     if (params.action === 'sync_all') {
       var data = params.data;
       
       updateSheet(ss, 'Nhan_Vien', data.employees, ['id', 'code', 'name', 'department', 'role', 'phone', 'password']);
-      updateSheet(ss, 'DanhMuc_Ca', data.shifts, ['id', 'name', 'start_time', 'end_time', 'color', 'text_color']);
+      updateSheet(ss, 'DanhMuc_Ca', data.shifts, ['id', 'name', 'department', 'start_time', 'end_time', 'color', 'text_color']);
       updateSheet(ss, 'Lich_Lam_Viec', data.schedules, ['id', 'date', 'employee_id', 'shift_id', 'task', 'status', 'note']);
       updateSheet(ss, 'Thang_Chot', data.lockedMonths, ['month']);
       updateSheet(ss, 'Thong_Bao', data.announcements, ['id', 'type', 'target_type', 'target_value', 'message', 'start_time', 'end_time', 'created_by', 'created_at']);
@@ -59,21 +60,34 @@ function updateSheet(ss, sheetName, items, columns) {
     var rows = items.map(function(item) {
       return columns.map(function(col) {
         var val = item[col];
-        return (val !== undefined && val !== null) ? val.toString() : '';
+        if (val === undefined || val === null) return '';
+        
+        // Format time strings to avoid 1899 date issue
+        if ((col === 'start_time' || col === 'end_time') && typeof val === 'string' && val.includes(':')) {
+           return val; // Keep as string HH:mm
+        }
+        
+        return val.toString();
       });
     });
     sheet.getRange(2, 1, rows.length, columns.length).setValues(rows);
+    
+    // Format time columns as Plain Text to avoid Google Sheets auto-formatting to 1899
+    var startTimeIdx = columns.indexOf('start_time');
+    var endTimeIdx = columns.indexOf('end_time');
+    if (startTimeIdx !== -1) sheet.getRange(2, startTimeIdx + 1, rows.length, 1).setNumberFormat('@');
+    if (endTimeIdx !== -1) sheet.getRange(2, endTimeIdx + 1, rows.length, 1).setNumberFormat('@');
   }
 }
 
 function doGet(e) {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (!ss) ss = SpreadsheetApp.getActive();
+    var ss = getSpreadsheet();
+    if (!ss) throw new Error("Không thể kết nối với Google Sheet. Hãy mở script từ menu 'Tiện ích mở rộng' trong file Sheet.");
     
     var data = {
       employees: getSheetData(ss, 'Nhan_Vien', ['id', 'code', 'name', 'department', 'role', 'phone', 'password']),
-      shifts: getSheetData(ss, 'DanhMuc_Ca', ['id', 'name', 'start_time', 'end_time', 'color', 'text_color']),
+      shifts: getSheetData(ss, 'DanhMuc_Ca', ['id', 'name', 'department', 'start_time', 'end_time', 'color', 'text_color']),
       schedules: getSheetData(ss, 'Lich_Lam_Viec', ['id', 'date', 'employee_id', 'shift_id', 'task', 'status', 'note']),
       lockedMonths: getSheetData(ss, 'Thang_Chot', ['month']),
       announcements: getSheetData(ss, 'Thong_Bao', ['id', 'type', 'target_type', 'target_value', 'message', 'start_time', 'end_time', 'created_by', 'created_at']),
@@ -111,6 +125,19 @@ function getSheetData(ss, sheetName, columns) {
         var val = row[colIndex];
         if (val !== '') hasData = true;
         
+        // Handle Date/Time objects from Google Sheets
+        if (val instanceof Date) {
+          if (columns[j] === 'start_time' || columns[j] === 'end_time') {
+            // Extract HH:mm
+            var hours = val.getHours().toString().padStart(2, '0');
+            var minutes = val.getMinutes().toString().padStart(2, '0');
+            val = hours + ':' + minutes;
+          } else if (columns[j] === 'date') {
+            // Keep as ISO but handle timezone
+            val = val.toISOString();
+          }
+        }
+
         // Chuyển đổi ID về dạng số để khớp với database
         var numericCols = ['id', 'employee_id', 'shift_id', 'created_by', 'announcement_id'];
         if (numericCols.indexOf(columns[j]) !== -1) {

@@ -77,7 +77,7 @@ function triggerSync() {
 
 async function loadFromGoogleSheets() {
   const url = getGoogleSheetsUrl();
-  if (!url) return;
+  if (!url) return { success: false, error: 'Chưa cấu hình URL Google Sheets' };
   try {
     console.log('Fetching data from Google Sheets...');
     const res = await fetch(url);
@@ -87,75 +87,79 @@ async function loadFromGoogleSheets() {
     try {
       data = JSON.parse(text);
     } catch (parseError) {
+      const errorMsg = 'URL trả về không phải dữ liệu JSON hợp lệ. Hãy kiểm tra lại bước Triển khai (Deploy) trong Apps Script.';
       console.error('\n=============================================================');
-      console.error('❌ LỖI KẾT NỐI GOOGLE SHEETS: URL trả về HTML thay vì JSON.');
-      console.error('Lỗi này xảy ra do cài đặt phân quyền lúc Deploy chưa chính xác.');
-      console.error('👉 CÁCH KHẮC PHỤC:');
-      console.error('1. Mở lại Google Apps Script.');
-      console.error('2. Bấm "Triển khai" (Deploy) -> "Quản lý công tác triển khai" (Manage deployments).');
-      console.error('3. Bấm biểu tượng cây bút (Chỉnh sửa) ở góc phải.');
-      console.error('4. Đảm bảo 2 cài đặt sau CHÍNH XÁC:');
-      console.error('   - Thực thi dưới tư cách (Execute as): CHỌN "Tôi" (Me)');
-      console.error('   - Quyền truy cập (Who has access): CHỌN "Bất kỳ ai" (Anyone)');
-      console.error('5. Bấm "Triển khai" (Deploy) lại và copy link mới (phải có đuôi /exec).');
+      console.error('❌ LỖI KẾT NỐI GOOGLE SHEETS:', errorMsg);
+      console.error('Nội dung phản hồi (trích đoạn):', text.substring(0, 200) + '...');
       console.error('=============================================================\n');
-      return;
+      return { success: false, error: errorMsg, details: text.substring(0, 100) };
     }
 
     if (data && data.employees) {
-      // SAFETY CHECK: If the incoming data is empty but we have local data, 
-      // do NOT wipe unless it's a confirmed empty state.
+      const sheetEmpCount = data.employees.length;
+      const sheetSchedCount = data.schedules ? data.schedules.length : 0;
+      console.log(`Sheet data received: ${sheetEmpCount} employees, ${sheetSchedCount} schedules.`);
+
       const localEmpCount = db.prepare('SELECT COUNT(*) as count FROM employees').get() as { count: number };
-      if (data.employees.length === 0 && localEmpCount.count > 0) {
-        console.warn('⚠️ CẢNH BÁO: Dữ liệu từ Google Sheets trống. Hệ thống đã chặn việc xóa dữ liệu cục bộ để bảo vệ an toàn.');
-        return;
+      
+      if (sheetEmpCount === 0 && localEmpCount.count > 0) {
+        const warnMsg = 'Dữ liệu nhân viên từ Google Sheets trống. Hệ thống đã chặn việc xóa dữ liệu cục bộ để bảo vệ an toàn.';
+        console.warn('⚠️ CẢNH BÁO:', warnMsg);
+        return { success: false, error: warnMsg };
       }
 
       db.transaction(() => {
+        console.log('Wiping local data and replacing with Sheet data...');
         db.prepare('DELETE FROM employees').run();
         db.prepare('DELETE FROM shifts').run();
         db.prepare('DELETE FROM schedules').run();
         db.prepare('DELETE FROM locked_months').run();
         db.prepare('DELETE FROM announcements').run();
         db.prepare('DELETE FROM leave_requests').run();
-        // Only delete tasks if we have new ones to replace them with
-        // to prevent wiping defaults if the sheet is missing/empty
+        
         if (data.tasks && data.tasks.length > 0) {
           db.prepare('DELETE FROM tasks').run();
         }
 
-        if (data.employees.length > 0) {
+        if (sheetEmpCount > 0) {
           const insertEmp = db.prepare('INSERT INTO employees (id, code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?, ?)');
           let hasAdmin = false;
           data.employees.forEach((e: any) => {
             let role = e.role || 'Nhân viên';
-            if (role.toLowerCase() === 'admin') {
+            const roleLower = role.toLowerCase();
+            if (roleLower === 'admin') {
               role = 'Admin';
               hasAdmin = true;
             }
-            else if (role.toLowerCase() === 'tổ trưởng') role = 'Tổ trưởng';
-            else if (role.toLowerCase() === 'nhân viên') role = 'Nhân viên';
+            else if (roleLower === 'tổ trưởng') role = 'Tổ trưởng';
+            else role = 'Nhân viên';
             
             let password = e.password !== undefined && e.password !== null ? String(e.password) : '';
-            if (role === 'Admin' && !password) {
-              password = '1234';
-            }
+            if (role === 'Admin' && !password) password = '1234';
             
             insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password);
           });
           
           if (!hasAdmin) {
+            console.log('No Admin found in Sheet, adding default Admin.');
             const insertDefaultAdmin = db.prepare('INSERT INTO employees (code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?)');
             insertDefaultAdmin.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234');
           }
         } else {
+          console.log('Sheet has no employees, keeping/adding default Admin.');
           const insertDefaultAdmin = db.prepare('INSERT INTO employees (code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?)');
           insertDefaultAdmin.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234');
         }
 
         if (data.shifts && data.shifts.length > 0) {
-          const insertShift = db.prepare('INSERT INTO shifts (id, name, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?)');
-          data.shifts.forEach((s: any) => insertShift.run(s.id, s.name, s.start_time, s.end_time, s.color, s.text_color));
+          const insertShift = db.prepare('INSERT INTO shifts (id, name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          data.shifts.forEach((s: any) => {
+            let start = s.start_time;
+            let end = s.end_time;
+            if (start && start.includes('T')) start = start.split('T')[1].substring(0, 5);
+            if (end && end.includes('T')) end = end.split('T')[1].substring(0, 5);
+            insertShift.run(s.id, s.name, s.department || 'All', start, end, s.color, s.text_color);
+          });
         }
 
         if (data.schedules && data.schedules.length > 0) {
@@ -167,21 +171,14 @@ async function loadFromGoogleSheets() {
             if (s.date && typeof s.date === 'string') {
               if (s.date.includes('T')) {
                 const d = new Date(s.date);
-                // Google Sheets often exports dates as 17:00 UTC of the previous day for GMT+7 users
-                if (s.date.includes('T17:00:00')) {
-                  d.setHours(d.getHours() + 7);
-                }
+                if (s.date.includes('T17:00:00')) d.setHours(d.getHours() + 7);
                 normalizedDate = d.toISOString().split('T')[0];
               } else if (s.date.match(/^\d{4}-\d{2}-\d{2}/)) {
                 normalizedDate = s.date.substring(0, 10);
               }
             }
-
-            if (s.id) {
-              insertSchedWithId.run(s.id, normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
-            } else {
-              insertSchedNoId.run(normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
-            }
+            if (s.id) insertSchedWithId.run(s.id, normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
+            else insertSchedNoId.run(normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
           });
         }
 
@@ -212,11 +209,13 @@ async function loadFromGoogleSheets() {
           data.tasks.forEach((t: any) => insertTask.run(t.id, t.department, t.name, t.color, t.text_color));
         }
       })();
-      seedTasks(); // Ensure defaults exist even after sync
-      console.log('Successfully loaded data from Google Sheets');
+      seedTasks();
+      return { success: true, employees: sheetEmpCount, schedules: sheetSchedCount };
     }
-  } catch (err) {
+    return { success: false, error: 'Dữ liệu từ Google Sheets không hợp lệ hoặc thiếu bảng Nhan_Vien' };
+  } catch (err: any) {
     console.error('Failed to load from Google Sheets:', err);
+    return { success: false, error: 'Lỗi kết nối máy chủ Google: ' + err.message };
   }
 }
 
@@ -252,6 +251,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS shifts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
+    department TEXT DEFAULT 'All',
     start_time TEXT,
     end_time TEXT,
     color TEXT,
@@ -378,14 +378,32 @@ if (employeeCount.count === 0) {
   const insertEmployee = db.prepare('INSERT INTO employees (code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?)');
   insertEmployee.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234');
 
-  const insertShift = db.prepare('INSERT INTO shifts (name, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?)');
-  insertShift.run('SÁNG', '08:30', '17:30', '#e0f2fe', '#0369a1');
-  insertShift.run('CHIỀU', '13:30', '21:00', '#ffedd5', '#c2410c');
-  insertShift.run('LỠ', '10:00', '19:00', '#d6c4b5', '#4a3b32'); 
-  insertShift.run('OFF TUẦN', '00:00', '23:59', '#fef08a', '#854d0e'); 
-  insertShift.run('OFF PHÉP', '00:00', '23:59', '#fef08a', '#854d0e'); 
-  insertShift.run('OFF KHÔNG LƯƠNG', '00:00', '23:59', '#fef08a', '#854d0e'); 
-  insertShift.run('TĂNG CA', '08:30', '21:00', '#ef4444', '#ffffff'); 
+  const insertShift = db.prepare('INSERT INTO shifts (name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?)');
+  
+  // Thu ngân, Kỹ thuật, Giao vận
+  ['Thu ngân', 'Kỹ thuật', 'Giao vận'].forEach(dept => {
+    insertShift.run('SÁNG', dept, '08:30', '17:00', '#e0f2fe', '#0369a1');
+    insertShift.run('CHIỀU', dept, '12:00', '21:00', '#ffedd5', '#c2410c');
+  });
+
+  // Kho
+  insertShift.run('SÁNG', 'Kho', '08:30', '18:00', '#e0f2fe', '#0369a1');
+  insertShift.run('CHIỀU', 'Kho', '12:00', '21:00', '#ffedd5', '#c2410c');
+
+  // Bán hàng, Quản lý
+  ['Bán hàng', 'Quản lý'].forEach(dept => {
+    insertShift.run('SÁNG', dept, '08:30', '17:00', '#e0f2fe', '#0369a1');
+    insertShift.run('CHIỀU', dept, '13:00', '21:00', '#ffedd5', '#c2410c');
+  });
+
+  // Ca lỡ (All)
+  insertShift.run('LỠ', 'All', '10:00', '19:00', '#d6c4b5', '#4a3b32'); 
+  
+  // Other shifts
+  insertShift.run('OFF TUẦN', 'All', '00:00', '23:59', '#fef08a', '#854d0e'); 
+  insertShift.run('OFF PHÉP', 'All', '00:00', '23:59', '#fef08a', '#854d0e'); 
+  insertShift.run('OFF KHÔNG LƯƠNG', 'All', '00:00', '23:59', '#fef08a', '#854d0e'); 
+  insertShift.run('TĂNG CA', 'All', '08:30', '21:00', '#ef4444', '#ffffff'); 
 }
 
 async function startServer() {
@@ -454,6 +472,31 @@ async function startServer() {
   app.get('/api/shifts', (req, res) => {
     const shifts = db.prepare('SELECT * FROM shifts').all();
     res.json(shifts);
+  });
+
+  app.post('/api/shifts', (req, res) => {
+    const { name, department, start_time, end_time, color, text_color } = req.body;
+    const result = db.prepare('INSERT INTO shifts (name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(name, department || 'All', start_time, end_time, color, text_color);
+    io.emit('shifts:updated');
+    triggerSync();
+    res.json({ id: result.lastInsertRowid });
+  });
+
+  app.put('/api/shifts/:id', (req, res) => {
+    const { name, department, start_time, end_time, color, text_color } = req.body;
+    db.prepare('UPDATE shifts SET name = ?, department = ?, start_time = ?, end_time = ?, color = ?, text_color = ? WHERE id = ?')
+      .run(name, department || 'All', start_time, end_time, color, text_color, req.params.id);
+    io.emit('shifts:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.delete('/api/shifts/:id', (req, res) => {
+    db.prepare('DELETE FROM shifts WHERE id = ?').run(req.params.id);
+    io.emit('shifts:updated');
+    triggerSync();
+    res.json({ success: true });
   });
 
   app.get('/api/schedules', (req, res) => {
@@ -748,13 +791,18 @@ async function startServer() {
 
   app.post('/api/sync', async (req, res) => {
     try {
-      await loadFromGoogleSheets();
-      io.emit('employees:updated');
-      io.emit('schedules:updated');
-      io.emit('settings:updated');
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Lỗi đồng bộ dữ liệu' });
+      const result = await loadFromGoogleSheets();
+      if (result.success) {
+        io.emit('employees:updated');
+        io.emit('shifts:updated');
+        io.emit('schedules:updated');
+        io.emit('settings:updated');
+        res.json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Lỗi hệ thống: ' + error.message });
     }
   });
 

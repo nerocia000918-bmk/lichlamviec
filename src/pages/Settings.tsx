@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Role } from '../App';
 import clsx from 'clsx';
@@ -13,6 +13,9 @@ export default function Settings({ role, user }: { role: Role, user: any }) {
   const [passStatus, setPassStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [passError, setPassError] = useState('');
 
+  const [shifts, setShifts] = useState<any[]>([]);
+  const [editingShift, setEditingShift] = useState<any>(null);
+
   useEffect(() => {
     fetch('/api/settings')
       .then(res => res.json())
@@ -20,7 +23,44 @@ export default function Settings({ role, user }: { role: Role, user: any }) {
         const sheetUrl = data.find((s: any) => s.key === 'GOOGLE_SHEETS_URL');
         if (sheetUrl) setUrl(sheetUrl.value);
       });
+    
+    fetch('/api/shifts')
+      .then(res => res.json())
+      .then(data => setShifts(data));
   }, []);
+
+  const handleSaveShift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const method = editingShift.id ? 'PUT' : 'POST';
+    const url = editingShift.id ? `/api/shifts/${editingShift.id}` : '/api/shifts';
+    
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingShift)
+      });
+      if (res.ok) {
+        const updatedShifts = await fetch('/api/shifts').then(r => r.json());
+        setShifts(updatedShifts);
+        setEditingShift(null);
+      }
+    } catch (err) {
+      console.error('Error saving shift:', err);
+    }
+  };
+
+  const handleDeleteShift = async (id: number) => {
+    if (!confirm('Bạn có chắc muốn xóa ca này?')) return;
+    try {
+      const res = await fetch(`/api/shifts/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setShifts(shifts.filter(s => s.id !== id));
+      }
+    } catch (err) {
+      console.error('Error deleting shift:', err);
+    }
+  };
 
   const handleSave = async () => {
     setStatus('saving');
@@ -46,14 +86,18 @@ export default function Settings({ role, user }: { role: Role, user: any }) {
     setSyncStatus('syncing');
     try {
       const res = await fetch('/api/sync', { method: 'POST' });
+      const data = await res.json();
       if (res.ok) {
         setSyncStatus('success');
+        alert(`Đồng bộ thành công! Đã tải ${data.employees} nhân viên và ${data.schedules} lịch làm việc.`);
         setTimeout(() => setSyncStatus('idle'), 3000);
       } else {
         setSyncStatus('error');
+        alert(`Lỗi đồng bộ: ${data.error || 'Không xác định'}`);
       }
     } catch (err) {
       setSyncStatus('error');
+      alert('Lỗi kết nối khi đồng bộ dữ liệu.');
     }
   };
 
@@ -141,6 +185,151 @@ export default function Settings({ role, user }: { role: Role, user: any }) {
           </div>
         </div>
       </div>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Quản lý Ca làm việc</h2>
+            <p className="text-sm text-slate-500">Thiết lập thời gian làm việc cho từng bộ phận.</p>
+          </div>
+          <button 
+            onClick={() => setEditingShift({ name: '', department: 'All', start_time: '08:30', end_time: '17:30', color: '#e0f2fe', text_color: '#0369a1' })}
+            className="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-colors"
+          >
+            + Thêm ca mới
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {shifts.map(shift => (
+            <div key={shift.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 flex justify-between items-center">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-bold text-slate-800">{shift.name}</span>
+                  <span className="text-[10px] px-2 py-0.5 bg-white border border-slate-200 rounded-full text-slate-500 font-medium">
+                    {shift.department === 'All' ? 'Tất cả' : shift.department}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 font-mono">{shift.start_time} - {shift.end_time}</p>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setEditingShift(shift)}
+                  className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => handleDeleteShift(shift.id)}
+                  className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                >
+                  <AlertCircle className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editingShift && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <form onSubmit={handleSaveShift}>
+              <div className="p-6 border-b border-slate-100">
+                <h3 className="text-lg font-bold text-slate-800">{editingShift.id ? 'Sửa ca làm việc' : 'Thêm ca làm việc mới'}</h3>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Tên ca</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={editingShift.name}
+                      onChange={e => setEditingShift({ ...editingShift, name: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="VD: SÁNG"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Bộ phận</label>
+                    <select 
+                      value={editingShift.department}
+                      onChange={e => setEditingShift({ ...editingShift, department: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="All">Tất cả</option>
+                      <option value="Bán hàng">Bán hàng</option>
+                      <option value="Quản lý">Quản lý</option>
+                      <option value="Thu ngân">Thu ngân</option>
+                      <option value="Kỹ thuật">Kỹ thuật</option>
+                      <option value="Giao vận">Giao vận</option>
+                      <option value="Kho">Kho</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Giờ vào</label>
+                    <input 
+                      type="time" 
+                      required
+                      value={editingShift.start_time}
+                      onChange={e => setEditingShift({ ...editingShift, start_time: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Giờ ra</label>
+                    <input 
+                      type="time" 
+                      required
+                      value={editingShift.end_time}
+                      onChange={e => setEditingShift({ ...editingShift, end_time: e.target.value })}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Màu nền</label>
+                    <input 
+                      type="color" 
+                      value={editingShift.color}
+                      onChange={e => setEditingShift({ ...editingShift, color: e.target.value })}
+                      className="w-full h-10 p-1 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Màu chữ</label>
+                    <input 
+                      type="color" 
+                      value={editingShift.text_color}
+                      onChange={e => setEditingShift({ ...editingShift, text_color: e.target.value })}
+                      className="w-full h-10 p-1 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="p-6 bg-slate-50 flex justify-end gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setEditingShift(null)}
+                  className="px-4 py-2 text-slate-600 font-medium hover:text-slate-800"
+                >
+                  Hủy
+                </button>
+                <button 
+                  type="submit"
+                  className="bg-indigo-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-indigo-700 transition-colors"
+                >
+                  Lưu thay đổi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         <h2 className="text-xl font-bold text-slate-800 mb-2">Đổi mật khẩu Admin</h2>

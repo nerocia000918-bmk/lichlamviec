@@ -18,6 +18,7 @@ interface Employee {
 interface Shift {
   id: number;
   name: string;
+  department: string;
   start_time: string;
   end_time: string;
   color: string;
@@ -137,11 +138,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
   useEffect(() => {
     fetchData();
     socket.on('schedules:updated', fetchData);
+    socket.on('shifts:updated', fetchData);
     socket.on('settings:updated', fetchData);
     socket.on('announcements:updated', fetchData);
     socket.on('tasks:updated', fetchData);
     return () => {
       socket.off('schedules:updated', fetchData);
+      socket.off('shifts:updated', fetchData);
       socket.off('settings:updated', fetchData);
       socket.off('announcements:updated', fetchData);
       socket.off('tasks:updated', fetchData);
@@ -1036,22 +1039,32 @@ export default function ScheduleView({ user }: { user: User | null }) {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Ca làm việc</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {shifts.map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => setEditData({ ...editData, shift_id: s.id })}
-                      className={clsx(
-                        "p-2 rounded-xl text-sm font-bold uppercase tracking-wide border transition-all",
-                        editData.shift_id === s.id ? "ring-2 ring-indigo-500 border-transparent shadow-sm" : "border-slate-200 hover:border-indigo-300"
-                      )}
-                      style={{ 
-                        backgroundColor: editData.shift_id === s.id ? s.color : '#fff',
-                        color: editData.shift_id === s.id ? s.text_color : '#334155'
-                      }}
-                    >
-                      {s.name}
-                    </button>
-                  ))}
+                  {shifts
+                    .filter(s => {
+                      const emp = employees.find(e => e.id === selectedCell.empId);
+                      const empDept = (emp?.department || '').trim().toLowerCase();
+                      const shiftDept = (s.department || 'All').trim().toLowerCase();
+                      return shiftDept === 'all' || shiftDept === empDept;
+                    })
+                    .map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => setEditData({ ...editData, shift_id: s.id })}
+                        className={clsx(
+                          "p-2 rounded-xl text-sm font-bold uppercase tracking-wide border transition-all flex flex-col items-center",
+                          editData.shift_id === s.id ? "ring-2 ring-indigo-500 border-transparent shadow-sm" : "border-slate-200 hover:border-indigo-300"
+                        )}
+                        style={{ 
+                          backgroundColor: editData.shift_id === s.id ? s.color : '#fff',
+                          color: editData.shift_id === s.id ? s.text_color : '#334155'
+                        }}
+                      >
+                        <span>{s.name}</span>
+                        <span className="text-[9px] opacity-70 font-medium lowercase mt-0.5">
+                          {s.start_time} - {s.end_time}
+                        </span>
+                      </button>
+                    ))}
                 </div>
               </div>
 
