@@ -122,7 +122,7 @@ async function loadFromGoogleSheets() {
         }
 
         if (sheetEmpCount > 0) {
-          const insertEmp = db.prepare('INSERT INTO employees (id, code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?, ?)');
           let hasAdmin = false;
           data.employees.forEach((e: any) => {
             let role = e.role || 'Nhân viên';
@@ -152,7 +152,7 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.shifts && data.shifts.length > 0) {
-          const insertShift = db.prepare('INSERT INTO shifts (id, name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          const insertShift = db.prepare('INSERT OR REPLACE INTO shifts (id, name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?, ?)');
           data.shifts.forEach((s: any) => {
             let start = s.start_time;
             let end = s.end_time;
@@ -163,7 +163,7 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.schedules && data.schedules.length > 0) {
-          const insertSchedWithId = db.prepare('INSERT INTO schedules (id, date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          const insertSchedWithId = db.prepare('INSERT OR REPLACE INTO schedules (id, date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?, ?)');
           const insertSchedNoId = db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)');
           
           data.schedules.forEach((s: any) => {
@@ -183,8 +183,10 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.lockedMonths && data.lockedMonths.length > 0) {
-          const insertLock = db.prepare('INSERT INTO locked_months (month) VALUES (?)');
-          data.lockedMonths.forEach((l: any) => insertLock.run(l.month));
+          const insertLock = db.prepare('INSERT OR IGNORE INTO locked_months (month) VALUES (?)');
+          data.lockedMonths.forEach((l: any) => {
+            if (l && l.month) insertLock.run(l.month);
+          });
         }
 
         if (data.announcements && data.announcements.length > 0) {
@@ -881,8 +883,21 @@ async function startServer() {
     app.use(express.static('dist'));
   }
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    
+    // Auto-sync from Google Sheets on startup if URL exists
+    // This helps restore data on Render free tier which has ephemeral storage
+    const url = getGoogleSheetsUrl();
+    if (url) {
+      console.log('Auto-syncing from Google Sheets on startup...');
+      try {
+        await loadFromGoogleSheets();
+        console.log('Auto-sync completed.');
+      } catch (e) {
+        console.error('Auto-sync failed:', e);
+      }
+    }
   });
 }
 
