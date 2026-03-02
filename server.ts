@@ -14,7 +14,22 @@ const GOOGLE_SHEETS_URL = process.env.GOOGLE_SHEETS_URL;
 function getGoogleSheetsUrl() {
   try {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('GOOGLE_SHEETS_URL') as { value: string } | undefined;
-    return row ? row.value : process.env.GOOGLE_SHEETS_URL;
+    const envUrl = process.env.GOOGLE_SHEETS_URL;
+    
+    // If found in DB, use it
+    if (row && row.value) return row.value;
+    
+    // If not in DB but in ENV, save to DB so UI shows it, and return it
+    if (envUrl) {
+      try {
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('GOOGLE_SHEETS_URL', envUrl);
+      } catch (e) {
+        console.error('Failed to save ENV GOOGLE_SHEETS_URL to DB:', e);
+      }
+      return envUrl;
+    }
+    
+    return undefined;
   } catch (e) {
     return process.env.GOOGLE_SHEETS_URL;
   }
