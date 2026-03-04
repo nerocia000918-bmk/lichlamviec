@@ -849,7 +849,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
               {Array.from(new Set(filteredEmployees.map(e => e.department))).map(dept => (
                 <React.Fragment key={dept}>
                   <tr className="bg-slate-100/80 border-y border-slate-200">
-                    <td colSpan={8} className="p-3 font-bold text-slate-700 uppercase tracking-wider text-sm sticky left-0 z-20 bg-slate-100/80">
+                    <td colSpan={8} className="p-3 pl-10 font-bold text-slate-700 uppercase tracking-wider text-sm sticky left-0 z-20 bg-slate-100/80">
                       Bộ phận: {dept}
                     </td>
                   </tr>

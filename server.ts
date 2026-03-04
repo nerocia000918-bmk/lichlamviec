@@ -707,24 +707,48 @@ async function startServer() {
     const { status } = req.body;
     const id = Number(req.params.id);
     
+    console.log(`[LeaveRequest] Updating ID ${id} to status: ${status}`);
+    
     db.prepare('UPDATE leave_requests SET status = ? WHERE id = ?').run(status, id);
     
     if (status === 'Đã duyệt') {
       const reqData = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(id) as any;
       if (reqData) {
+        console.log(`[LeaveRequest] Processing schedule for ${reqData.employee_id} on ${reqData.date}`);
+        
+        // Verify shift still exists, if not find a fallback OFF shift
+        let finalShiftId = reqData.shift_id;
+        const shiftExists = db.prepare('SELECT id FROM shifts WHERE id = ?').get(finalShiftId);
+        
+        if (!shiftExists) {
+          console.log(`[LeaveRequest] Shift ID ${finalShiftId} not found, searching for fallback OFF shift`);
+          const fallback = db.prepare("SELECT id FROM shifts WHERE name LIKE 'OFF%' LIMIT 1").get() as any;
+          if (fallback) {
+            finalShiftId = fallback.id;
+            console.log(`[LeaveRequest] Using fallback shift ID: ${finalShiftId}`);
+          } else {
+            console.error(`[LeaveRequest] CRITICAL: No OFF shift found in database!`);
+          }
+        }
+
         const existing = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?').get(reqData.date, reqData.employee_id) as any;
         if (existing) {
+          console.log(`[LeaveRequest] Updating existing schedule ID: ${existing.id}`);
           db.prepare('UPDATE schedules SET shift_id = ?, task = ?, status = ?, note = ? WHERE id = ?')
-            .run(reqData.shift_id, 'Không', 'Published', 'Nghỉ phép đã duyệt', existing.id);
+            .run(finalShiftId, 'Không', 'Published', 'Nghỉ phép đã duyệt', existing.id);
         } else {
+          console.log(`[LeaveRequest] Creating new schedule entry`);
           db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(reqData.date, reqData.employee_id, reqData.shift_id, 'Không', 'Published', 'Nghỉ phép đã duyệt');
+            .run(reqData.date, reqData.employee_id, finalShiftId, 'Không', 'Published', 'Nghỉ phép đã duyệt');
         }
+        
+        // Important: Emit to all clients that schedules changed
         io.emit('schedules:updated');
       }
     } else if (status === 'Từ chối') {
       const reqData = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(id) as any;
       if (reqData) {
+        console.log(`[LeaveRequest] Removing schedule for denied request`);
         db.prepare("DELETE FROM schedules WHERE date = ? AND employee_id = ? AND note = 'Nghỉ phép đã duyệt'")
           .run(reqData.date, reqData.employee_id);
         io.emit('schedules:updated');
