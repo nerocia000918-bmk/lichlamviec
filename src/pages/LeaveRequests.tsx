@@ -311,12 +311,12 @@ export default function LeaveRequests({ user }: { user: User | null }) {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Lý do</label>
                 <textarea 
-                  required={shifts.find(s => s.id === formData.shift_id)?.name !== 'OFF TUẦN'}
+                  required={!shifts.find(s => s.id === formData.shift_id)?.name?.toUpperCase().includes('OFF TUẦN')}
                   rows={3}
                   value={formData.reason} 
                   onChange={e => setFormData({...formData, reason: e.target.value})} 
                   className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
-                  placeholder={shifts.find(s => s.id === formData.shift_id)?.name === 'OFF TUẦN' ? "Nhập lý do (không bắt buộc)..." : "Nhập lý do xin nghỉ..."}
+                  placeholder={shifts.find(s => s.id === formData.shift_id)?.name?.toUpperCase().includes('OFF TUẦN') ? "Nhập lý do (không bắt buộc)..." : "Nhập lý do xin nghỉ..."}
                 />
               </div>
 
