@@ -36,6 +36,8 @@ function getGoogleSheetsUrl() {
 }
 
 let syncTimeout: NodeJS.Timeout | null = null;
+let io: Server | null = null;
+
 function triggerSync() {
   const url = getGoogleSheetsUrl();
   if (!url) return;
@@ -88,6 +90,68 @@ function triggerSync() {
       console.error('Failed to sync to Google Sheets:', err);
     }
   }, 2000);
+}
+
+function normalizeDate(dateStr: any): string {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  let normalized = dateStr;
+  if (dateStr.includes('T')) {
+    const d = new Date(dateStr);
+    // Handle Google Sheets timezone offset (often 17:00 of previous day)
+    if (dateStr.includes('T17:00:00')) {
+      d.setHours(d.getHours() + 7);
+    }
+    normalized = d.toISOString().split('T')[0];
+  } else {
+    const match = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) {
+      normalized = match[1];
+    }
+  }
+  return normalized;
+}
+
+function reconcileLeaveRequestsWithSchedules() {
+  console.log('[Reconciliation] Starting leave request and schedule reconciliation...');
+  try {
+    const approvedRequests = db.prepare("SELECT * FROM leave_requests WHERE status = 'Đã duyệt'").all() as any[];
+    let fixedCount = 0;
+
+    for (const req of approvedRequests) {
+      const normalizedDate = normalizeDate(req.date);
+      const existing = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?').get(normalizedDate, req.employee_id) as any;
+      
+      if (!existing || existing.note !== 'Nghỉ phép đã duyệt') {
+        console.log(`[Reconciliation] Fixing missing/incorrect schedule for employee ${req.employee_id} on ${normalizedDate}`);
+        
+        // Find shift
+        let finalShiftId = req.shift_id;
+        const shiftExists = db.prepare('SELECT id FROM shifts WHERE id = ?').get(finalShiftId);
+        if (!shiftExists) {
+          const fallback = db.prepare("SELECT id FROM shifts WHERE name LIKE 'OFF%' LIMIT 1").get() as any;
+          if (fallback) finalShiftId = fallback.id;
+        }
+
+        if (existing) {
+          db.prepare('UPDATE schedules SET shift_id = ?, task = ?, status = ?, note = ? WHERE id = ?')
+            .run(finalShiftId, 'Không', 'Published', 'Nghỉ phép đã duyệt', existing.id);
+        } else {
+          db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(normalizedDate, req.employee_id, finalShiftId, 'Không', 'Published', 'Nghỉ phép đã duyệt');
+        }
+        fixedCount++;
+      }
+    }
+    
+    if (fixedCount > 0) {
+      console.log(`[Reconciliation] Fixed ${fixedCount} schedule entries.`);
+      if (io) io.emit('schedules:updated');
+    } else {
+      console.log('[Reconciliation] All approved leave requests are correctly reflected in schedules.');
+    }
+  } catch (error) {
+    console.error('[Reconciliation] Error during reconciliation:', error);
+  }
 }
 
 async function loadFromGoogleSheets() {
@@ -182,16 +246,7 @@ async function loadFromGoogleSheets() {
           const insertSchedNoId = db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)');
           
           data.schedules.forEach((s: any) => {
-            let normalizedDate = s.date;
-            if (s.date && typeof s.date === 'string') {
-              if (s.date.includes('T')) {
-                const d = new Date(s.date);
-                if (s.date.includes('T17:00:00')) d.setHours(d.getHours() + 7);
-                normalizedDate = d.toISOString().split('T')[0];
-              } else if (s.date.match(/^\d{4}-\d{2}-\d{2}/)) {
-                normalizedDate = s.date.substring(0, 10);
-              }
-            }
+            const normalizedDate = normalizeDate(s.date);
             if (s.id) insertSchedWithId.run(s.id, normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
             else insertSchedNoId.run(normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
           });
@@ -217,7 +272,10 @@ async function loadFromGoogleSheets() {
 
         if (data.leaveRequests && data.leaveRequests.length > 0) {
           const insertLeave = db.prepare('INSERT INTO leave_requests (id, employee_id, date, shift_id, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-          data.leaveRequests.forEach((l: any) => insertLeave.run(l.id, l.employee_id, l.date, l.shift_id, l.reason, l.status, l.created_at));
+          data.leaveRequests.forEach((l: any) => {
+            const normalizedDate = normalizeDate(l.date);
+            insertLeave.run(l.id, l.employee_id, normalizedDate, l.shift_id, l.reason, l.status, l.created_at);
+          });
         }
 
         if (data.tasks && data.tasks.length > 0) {
@@ -226,6 +284,10 @@ async function loadFromGoogleSheets() {
           data.tasks.forEach((t: any) => insertTask.run(t.id, t.department, t.name, t.color, t.text_color));
         }
       })();
+      
+      // Reconcile leave requests after loading from sheet
+      reconcileLeaveRequestsWithSchedules();
+      
       seedTasks();
       return { success: true, employees: sheetEmpCount, schedules: sheetSchedCount };
     }
@@ -429,7 +491,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   const httpServer = createServer(app);
-  const io = new Server(httpServer, {
+  io = new Server(httpServer, {
     cors: { origin: '*' }
   });
 
@@ -521,8 +583,8 @@ async function startServer() {
     const schedules = db.prepare(`
       SELECT s.*, e.name as employee_name, e.department, sh.name as shift_name, sh.start_time, sh.end_time, sh.color, sh.text_color
       FROM schedules s
-      JOIN employees e ON s.employee_id = e.id
-      JOIN shifts sh ON s.shift_id = sh.id
+      LEFT JOIN employees e ON s.employee_id = e.id
+      LEFT JOIN shifts sh ON s.shift_id = sh.id
       WHERE s.date >= ? AND s.date <= ?
     `).all(start, end);
     res.json(schedules);
@@ -530,22 +592,23 @@ async function startServer() {
 
   app.post('/api/schedules', (req, res) => {
     const { date, employee_id, shift_id, task, status, note } = req.body;
+    const normalizedDate = normalizeDate(date);
     
     // Check locked month
-    const month = date.substring(0, 7);
+    const month = normalizedDate.substring(0, 7);
     const isLocked = db.prepare('SELECT * FROM locked_months WHERE month = ?').get(month);
     if (isLocked) {
       return res.status(403).json({ error: 'Tháng này đã khóa lịch, không thể sửa' });
     }
 
-    const existing = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?').get(date, employee_id) as { id: number };
+    const existing = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?').get(normalizedDate, employee_id) as { id: number };
     
     if (existing) {
       db.prepare('UPDATE schedules SET shift_id = ?, task = ?, status = ?, note = ? WHERE id = ?')
         .run(shift_id, task, status, note || '', existing.id);
     } else {
       db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(date, employee_id, shift_id, task, status, note || '');
+        .run(normalizedDate, employee_id, shift_id, task, status, note || '');
     }
     
     io.emit('schedules:updated');
@@ -695,9 +758,10 @@ async function startServer() {
 
   app.post('/api/leave-requests', (req, res) => {
     const { employee_id, date, shift_id, reason } = req.body;
+    const normalizedDate = normalizeDate(date);
     const created_at = new Date().toISOString();
     db.prepare('INSERT INTO leave_requests (employee_id, date, shift_id, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(employee_id, date, shift_id, reason, 'Chờ duyệt', created_at);
+      .run(employee_id, normalizedDate, shift_id, reason, 'Chờ duyệt', created_at);
     io.emit('leave_requests:updated');
     triggerSync();
     res.json({ success: true });
@@ -712,45 +776,14 @@ async function startServer() {
     db.prepare('UPDATE leave_requests SET status = ? WHERE id = ?').run(status, id);
     
     if (status === 'Đã duyệt') {
-      const reqData = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(id) as any;
-      if (reqData) {
-        console.log(`[LeaveRequest] Processing schedule for ${reqData.employee_id} on ${reqData.date}`);
-        
-        // Verify shift still exists, if not find a fallback OFF shift
-        let finalShiftId = reqData.shift_id;
-        const shiftExists = db.prepare('SELECT id FROM shifts WHERE id = ?').get(finalShiftId);
-        
-        if (!shiftExists) {
-          console.log(`[LeaveRequest] Shift ID ${finalShiftId} not found, searching for fallback OFF shift`);
-          const fallback = db.prepare("SELECT id FROM shifts WHERE name LIKE 'OFF%' LIMIT 1").get() as any;
-          if (fallback) {
-            finalShiftId = fallback.id;
-            console.log(`[LeaveRequest] Using fallback shift ID: ${finalShiftId}`);
-          } else {
-            console.error(`[LeaveRequest] CRITICAL: No OFF shift found in database!`);
-          }
-        }
-
-        const existing = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?').get(reqData.date, reqData.employee_id) as any;
-        if (existing) {
-          console.log(`[LeaveRequest] Updating existing schedule ID: ${existing.id}`);
-          db.prepare('UPDATE schedules SET shift_id = ?, task = ?, status = ?, note = ? WHERE id = ?')
-            .run(finalShiftId, 'Không', 'Published', 'Nghỉ phép đã duyệt', existing.id);
-        } else {
-          console.log(`[LeaveRequest] Creating new schedule entry`);
-          db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(reqData.date, reqData.employee_id, finalShiftId, 'Không', 'Published', 'Nghỉ phép đã duyệt');
-        }
-        
-        // Important: Emit to all clients that schedules changed
-        io.emit('schedules:updated');
-      }
+      reconcileLeaveRequestsWithSchedules();
     } else if (status === 'Từ chối') {
       const reqData = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(id) as any;
       if (reqData) {
-        console.log(`[LeaveRequest] Removing schedule for denied request`);
+        const normalizedDate = normalizeDate(reqData.date);
+        console.log(`[LeaveRequest] Removing schedule for denied request on ${normalizedDate}`);
         db.prepare("DELETE FROM schedules WHERE date = ? AND employee_id = ? AND note = 'Nghỉ phép đã duyệt'")
-          .run(reqData.date, reqData.employee_id);
+          .run(normalizedDate, reqData.employee_id);
         io.emit('schedules:updated');
       }
     }
