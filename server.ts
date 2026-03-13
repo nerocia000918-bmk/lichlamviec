@@ -498,6 +498,10 @@ async function startServer() {
   app.use(express.json());
 
   // API Routes
+  app.get('/api/ping', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
   app.get('/api/employees', (req, res) => {
     const employees = db.prepare('SELECT * FROM employees').all();
     res.json(employees);

@@ -1,0 +1,21 @@
+{
+  "name": "Quản Lý Lịch Làm Việc",
+  "short_name": "Lịch Làm Việc",
+  "description": "Hệ thống quản lý lịch làm việc và đơn xin nghỉ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "https://picsum.photos/seed/schedule/192/192",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://picsum.photos/seed/schedule/512/512",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
