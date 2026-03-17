@@ -5,7 +5,7 @@
 
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, BookOpen, LogOut, User as UserIcon, Settings as SettingsIcon, CalendarMinus, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Calendar, Users, BookOpen, LogOut, User as UserIcon, Settings as SettingsIcon, CalendarMinus, Bell, AlertCircle, CheckCircle2, ClipboardList } from 'lucide-react';
 import ScheduleView from './pages/ScheduleView';
 import EmployeeList from './pages/EmployeeList';
 import Guide from './pages/Guide';
@@ -234,13 +234,13 @@ export default function App() {
                   <CalendarMinus className="w-5 h-5" />
                   <span className="text-[10px] md:text-sm font-medium">Xin nghỉ / OFF</span>
                 </Link>
-                <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
-                  <Info className="w-5 h-5" />
+                <Link to="/thong-bao" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
+                  <Bell className="w-5 h-5" />
                   <span className="text-[10px] md:text-sm font-medium">Thông báo</span>
                 </Link>
-                <Link to="/tasks" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span className="text-[10px] md:text-sm font-medium">Nhiệm vụ</span>
+                <Link to="/nhiem-vu" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
+                  <ClipboardList className="w-5 h-5" />
+                  <span className="text-[10px] md:text-sm font-medium">Nhiệm vụ được giao</span>
                 </Link>
                 {currentRole === 'Admin' && (
                   <>
@@ -326,7 +326,7 @@ export default function App() {
                   </ul>
                   <div className="mt-3 flex gap-3">
                     <Link 
-                      to="/tasks" 
+                      to="/nhiem-vu" 
                       onClick={() => setShowTaskNotification(false)}
                       className="text-xs font-bold text-amber-700 hover:underline"
                     >
@@ -348,8 +348,10 @@ export default function App() {
             {!isGuest && (
               <>
                 <Route path="/leave" element={<LeaveRequests user={user} />} />
-                <Route path="/announcements" element={<Announcements user={user} />} />
-                <Route path="/tasks" element={<Tasks />} />
+                <Route path="/announcements" element={<Navigate to="/thong-bao" replace />} />
+                <Route path="/thong-bao" element={<Announcements user={user} />} />
+                <Route path="/tasks" element={<Navigate to="/nhiem-vu" replace />} />
+                <Route path="/nhiem-vu" element={<Tasks />} />
                 <Route path="/employees" element={<EmployeeList role={currentRole} />} />
                 <Route path="/guide" element={<Guide />} />
                 <Route path="/settings" element={<Settings role={currentRole} user={user} />} />

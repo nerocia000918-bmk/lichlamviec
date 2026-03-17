@@ -233,8 +233,8 @@ export default function Tasks() {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Nhiệm Vụ Công Việc</h2>
-          <p className="text-slate-500">Giao việc và theo dõi tiến độ hoàn thành</p>
+          <h2 className="text-2xl font-bold text-slate-800">Nhiệm Vụ Được Giao</h2>
+          <p className="text-slate-500 text-sm">Giao việc cụ thể và theo dõi tiến độ (Khác với công việc trực ca hàng ngày)</p>
         </div>
         
         {(role === 'Admin' || role === 'Tổ trưởng') && (

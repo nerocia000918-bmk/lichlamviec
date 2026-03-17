@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
 import dotenv from 'dotenv';
+import path from 'path';
 
 dotenv.config();
 
@@ -1103,7 +1104,12 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    const distPath = path.resolve(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      console.log(`Serving SPA fallback for: ${req.url}`);
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   httpServer.listen(PORT, '0.0.0.0', async () => {

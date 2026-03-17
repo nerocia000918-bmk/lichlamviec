@@ -920,7 +920,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[200px] bg-slate-800 text-white text-xs rounded-lg py-1.5 px-3 opacity-0 group-hover/cell:opacity-100 pointer-events-none transition-opacity z-30 shadow-xl">
                                   <div className="font-bold mb-1">{emp.name}</div>
                                   <div>Ca: {sched.shift_name} ({sched.start_time} - {sched.end_time})</div>
-                                  {sched.task && sched.task !== 'Không' && <div>Nhiệm vụ: {sched.task}</div>}
+                                  {sched.task && sched.task !== 'Không' && <div>Công việc: {sched.task}</div>}
                                   {sched.note && <div className="mt-1 text-slate-300 italic border-t border-slate-600 pt-1">Ghi chú: {sched.note}</div>}
                                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
                                 </div>
@@ -1095,7 +1095,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
 
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-slate-700">Nhiệm vụ đặc biệt</label>
+                  <label className="block text-sm font-medium text-slate-700">Công việc trực ca</label>
                   {(role === 'Admin' || role === 'Tổ trưởng') && (
                     <button 
                       onClick={() => {
@@ -1137,7 +1137,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                   <div className="flex gap-2">
                     <input 
                       type="text"
-                      placeholder="Thêm nhanh nhiệm vụ..."
+                      placeholder="Thêm nhanh công việc..."
                       className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500"
                       onKeyDown={async (e) => {
                         if (e.key === 'Enter') {
