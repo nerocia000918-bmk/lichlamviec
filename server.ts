@@ -521,6 +521,15 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Redirect old routes to new ones
+  app.get(['/announcements', '/announcements/'], (req, res) => {
+    res.redirect('/thong-bao');
+  });
+
+  app.get(['/tasks', '/tasks/'], (req, res) => {
+    res.redirect('/nhiem-vu');
+  });
+
   // API Routes
   app.get('/api/ping', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -1103,11 +1112,24 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    
+    // Explicit fallback for development to ensure SPA routes work
+    app.get('*', async (req, res, next) => {
+      if (req.url.startsWith('/api')) return next();
+      try {
+        const fs = await import('fs');
+        const indexHtml = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
+        const transformedHtml = await vite.transformIndexHtml(req.url, indexHtml);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(transformedHtml);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      console.log(`Serving SPA fallback for: ${req.url}`);
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
