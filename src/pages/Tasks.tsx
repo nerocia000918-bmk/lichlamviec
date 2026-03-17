@@ -17,7 +17,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
-import { socket } from '../App';
+import { socket } from '../socket';
 import clsx from 'clsx';
 
 interface Employee {

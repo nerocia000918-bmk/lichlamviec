@@ -3,7 +3,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
 import { format, addDays, startOfWeek, subWeeks, isBefore, addHours, parseISO, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { User, socket } from '../App';
+import { socket } from '../socket';
+import { User } from '../types';
 import { ChevronLeft, ChevronRight, Copy, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, Wand2, X, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 

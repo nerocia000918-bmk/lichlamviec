@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Role, socket } from '../App';
+import { socket } from '../socket';
+import { Role } from '../types';
 import { Search, UserPlus, Edit2, Trash2 } from 'lucide-react';
 
 interface Employee {

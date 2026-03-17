@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format, parseISO, addDays } from 'date-fns';
-import { User, socket } from '../App';
+import { socket } from '../socket';
+import { User } from '../types';
 import { Plus, Trash2, Edit2, CheckCircle2, Users, Clock, X, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -143,14 +144,23 @@ export default function Announcements({ user }: { user: User | null }) {
   };
 
   const handleEdit = (ann: Announcement) => {
+    const now = new Date();
+    const nextWeek = addDays(now, 7);
+    
+    const safeParse = (str: string | null | undefined, fallback: Date) => {
+      if (!str) return fallback;
+      const d = parseISO(str);
+      return isNaN(d.getTime()) ? fallback : d;
+    };
+
     setFormData({
       id: ann.id,
       type: ann.type,
       target_type: ann.target_type,
       target_value: ann.target_value,
       message: ann.message,
-      start_time: ann.start_time ? format(parseISO(ann.start_time), "yyyy-MM-dd'T'HH:mm") : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
-      end_time: ann.end_time ? format(parseISO(ann.end_time), "yyyy-MM-dd'T'HH:mm") : format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm")
+      start_time: format(safeParse(ann.start_time, now), "yyyy-MM-dd'T'HH:mm"),
+      end_time: format(safeParse(ann.end_time, nextWeek), "yyyy-MM-dd'T'HH:mm")
     });
     setShowForm(true);
   };

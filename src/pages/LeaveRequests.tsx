@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { format, parseISO, startOfWeek, endOfWeek, addWeeks, isWithinInterval } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { User, socket } from '../App';
+import { socket } from '../socket';
+import { User } from '../types';
 import { Check, X, Clock, CalendarMinus, Info, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 

@@ -13,19 +13,8 @@ import Settings from './pages/Settings';
 import LeaveRequests from './pages/LeaveRequests';
 import Announcements from './pages/Announcements';
 import Tasks from './pages/Tasks';
-import { io } from 'socket.io-client';
-
-export const socket = io();
-
-export type Role = 'Admin' | 'Tổ trưởng' | 'Nhân viên';
-
-export interface User {
-  id: number;
-  code: string;
-  name: string;
-  department: string;
-  role: Role;
-}
+import { socket } from './socket';
+import { User, Role } from './types';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
