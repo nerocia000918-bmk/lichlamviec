@@ -63,7 +63,7 @@ export default function Tasks() {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const role = user?.role || 'Guest';
-  const departments = Array.from(new Set(employees.map(e => e.department))).filter(Boolean);
+  const departments = Array.isArray(employees) ? Array.from(new Set(employees.map(e => e.department))).filter(Boolean) : [];
 
   const [formData, setFormData] = useState({
     id: null as number | null,
@@ -74,33 +74,46 @@ export default function Tasks() {
   });
 
   const fetchData = async () => {
-    const [taskRes, empRes] = await Promise.all([
-      fetch('/api/assigned-tasks'),
-      fetch('/api/employees')
-    ]);
-    
-    const taskData = await taskRes.json();
-    const empData = await empRes.json();
-    
-    setEmployees(empData);
+    try {
+      const [taskRes, empRes] = await Promise.all([
+        fetch('/api/assigned-tasks'),
+        fetch('/api/employees')
+      ]);
+      
+      if (!taskRes.ok || !empRes.ok) return;
 
-    if (user) {
-      const tasksWithStatus = await Promise.all(taskData.map(async (t: AssignedTask) => {
-        const membersRes = await fetch(`/api/assigned-tasks/${t.id}/members`);
-        const members = await membersRes.json();
-        const myMember = members.find((m: any) => m.employee_id === user.id);
-        const completedCount = members.filter((m: any) => m.status === 'Completed').length;
-        return {
-          ...t,
-          my_status: myMember?.status,
-          my_viewed_at: myMember?.viewed_at,
-          completion_count: completedCount,
-          total_count: members.length
-        };
-      }));
-      setTasks(tasksWithStatus);
-    } else {
-      setTasks(taskData);
+      const taskData = await taskRes.json();
+      const empData = await empRes.json();
+      
+      if (Array.isArray(empData)) setEmployees(empData);
+
+      if (user && Array.isArray(taskData)) {
+        const tasksWithStatus = await Promise.all(taskData.map(async (t: AssignedTask) => {
+          try {
+            const membersRes = await fetch(`/api/assigned-tasks/${t.id}/members`);
+            if (!membersRes.ok) return { ...t, my_status: 'Pending' as const };
+            const members = await membersRes.json();
+            if (!Array.isArray(members)) return { ...t, my_status: 'Pending' as const };
+            
+            const myMember = members.find((m: any) => m.employee_id === user.id);
+            const completedCount = members.filter((m: any) => m.status === 'Completed').length;
+            return {
+              ...t,
+              my_status: myMember?.status,
+              my_viewed_at: myMember?.viewed_at,
+              completion_count: completedCount,
+              total_count: members.length
+            };
+          } catch (err) {
+            return { ...t, my_status: 'Pending' as const };
+          }
+        }));
+        setTasks(tasksWithStatus);
+      } else if (Array.isArray(taskData)) {
+        setTasks(taskData);
+      }
+    } catch (error) {
+      console.error('Failed to fetch tasks:', error);
     }
   };
 
@@ -182,9 +195,10 @@ export default function Tasks() {
 
     if (role === 'Admin') {
       if (taskFilter !== 'All') {
-        if (task.target_type === 'Department' && !task.target_value.split(',').includes(taskFilter)) return false;
+        const targetValues = (task.target_value || '').split(',').filter(v => v);
+        if (task.target_type === 'Department' && !targetValues.includes(taskFilter)) return false;
         if (task.target_type === 'Individual') {
-          const targetEmps = task.target_value.split(',').map(Number);
+          const targetEmps = targetValues.map(Number);
           const hasEmpInDept = targetEmps.some(id => employees.find(e => e.id === id)?.department === taskFilter);
           if (!hasEmpInDept) return false;
         }
@@ -197,8 +211,9 @@ export default function Tasks() {
     
     // If I am a target, I can see it
     if (task.target_type === 'All') return true;
-    if (task.target_type === 'Department' && task.target_value.split(',').includes(user?.department || '')) return true;
-    if (task.target_type === 'Individual' && task.target_value.split(',').includes(user?.id.toString() || '')) return true;
+    const targetValues = (task.target_value || '').split(',').filter(v => v);
+    if (task.target_type === 'Department' && targetValues.includes(user?.department || '')) return true;
+    if (task.target_type === 'Individual' && targetValues.includes(user?.id?.toString() || '')) return true;
     
     return false;
   });
@@ -265,9 +280,10 @@ export default function Tasks() {
       <div className="grid grid-cols-1 gap-6">
         {visibleTasks.map(task => {
           const canManage = role === 'Admin' || task.created_by === user?.id;
+          const targetValues = (task.target_value || '').split(',').filter(v => v);
           const isTarget = task.target_type === 'All' || 
-                          (task.target_type === 'Department' && task.target_value.split(',').includes(user?.department || '')) ||
-                          (task.target_type === 'Individual' && task.target_value.split(',').includes(user?.id.toString() || ''));
+                          (task.target_type === 'Department' && targetValues.includes(user?.department || '')) ||
+                          (task.target_type === 'Individual' && targetValues.includes(user?.id?.toString() || ''));
           
           return (
             <div 

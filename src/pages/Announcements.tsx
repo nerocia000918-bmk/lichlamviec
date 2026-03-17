@@ -52,13 +52,17 @@ export default function Announcements({ user }: { user: User | null }) {
   const role = user?.role || 'Guest';
 
   const fetchData = async () => {
-    const [annRes, empRes] = await Promise.all([
-      fetch('/api/announcements'),
-      fetch('/api/employees')
-    ]);
-    
-    setAnnouncements(await annRes.json());
-    setEmployees(await empRes.json());
+    try {
+      const [annRes, empRes] = await Promise.all([
+        fetch('/api/announcements'),
+        fetch('/api/employees')
+      ]);
+      
+      if (annRes.ok) setAnnouncements(await annRes.json());
+      if (empRes.ok) setEmployees(await empRes.json());
+    } catch (error) {
+      console.error('Failed to fetch announcements:', error);
+    }
   };
 
   useEffect(() => {
@@ -137,7 +141,7 @@ export default function Announcements({ user }: { user: User | null }) {
     setFormData({ ...formData, target_value: newValues.join(',') });
   };
 
-  const departments = Array.from(new Set(employees.map(e => e.department))).filter(Boolean) as string[];
+  const departments = Array.isArray(employees) ? Array.from(new Set(employees.map(e => e.department))).filter(Boolean) as string[] : [];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -161,9 +165,10 @@ export default function Announcements({ user }: { user: User | null }) {
       <div className="grid grid-cols-1 gap-4">
         {announcements.map(ann => {
           const canManage = role === 'Admin' || ann.created_by === user?.id;
+          const targetValues = (ann.target_value || '').split(',').filter(v => v);
           const isTarget = ann.target_type === 'All' || 
-                           (ann.target_type === 'Department' && ann.target_value.split(',').includes(user?.department || '')) ||
-                           (ann.target_type === 'Individual' && ann.target_value.split(',').includes(user?.id.toString() || ''));
+                           (ann.target_type === 'Department' && targetValues.includes(user?.department || '')) ||
+                           (ann.target_type === 'Individual' && targetValues.includes(user?.id?.toString() || ''));
 
           if (!canManage && !isTarget) return null;
 
@@ -197,7 +202,7 @@ export default function Announcements({ user }: { user: User | null }) {
                       Đối tượng: <span className="font-bold text-slate-700">
                         {ann.target_type === 'All' ? 'Tất cả' : 
                          ann.target_type === 'Department' ? `Tổ: ${ann.target_value}` : 
-                         `Cá nhân: ${ann.target_value.split(',').map(id => employees.find(e => e.id === Number(id))?.name || id).join(', ')}`}
+                         `Cá nhân: ${(ann.target_value || '').split(',').filter(v => v).map(id => employees.find(e => e.id === Number(id))?.name || id).join(', ')}`}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
