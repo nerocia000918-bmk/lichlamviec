@@ -51,6 +51,17 @@ export default function Announcements({ user }: { user: User | null }) {
 
   const role = user?.role || 'Guest';
 
+  const safeFormat = (dateStr: string | null | undefined, formatStr: string) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const date = parseISO(dateStr);
+      if (isNaN(date.getTime())) return 'N/A';
+      return format(date, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
   const fetchData = async () => {
     try {
       const [annRes, empRes] = await Promise.all([
@@ -58,8 +69,14 @@ export default function Announcements({ user }: { user: User | null }) {
         fetch('/api/employees')
       ]);
       
-      if (annRes.ok) setAnnouncements(await annRes.json());
-      if (empRes.ok) setEmployees(await empRes.json());
+      if (annRes.ok) {
+        const data = await annRes.json();
+        setAnnouncements(Array.isArray(data) ? data : []);
+      }
+      if (empRes.ok) {
+        const data = await empRes.json();
+        setEmployees(Array.isArray(data) ? data : []);
+      }
     } catch (error) {
       console.error('Failed to fetch announcements:', error);
     }
@@ -67,16 +84,24 @@ export default function Announcements({ user }: { user: User | null }) {
 
   useEffect(() => {
     fetchData();
-    socket.on('announcements:updated', fetchData);
+    const handleUpdate = () => fetchData();
+    socket.on('announcements:updated', handleUpdate);
     return () => {
-      socket.off('announcements:updated', fetchData);
+      socket.off('announcements:updated', handleUpdate);
     };
   }, []);
 
   const fetchViews = async (id: number) => {
-    const res = await fetch(`/api/announcements/${id}/views`);
-    setViewStatus(await res.json());
-    setShowViews(id);
+    try {
+      const res = await fetch(`/api/announcements/${id}/views`);
+      if (res.ok) {
+        const data = await res.json();
+        setViewStatus(Array.isArray(data) ? data : []);
+        setShowViews(id);
+      }
+    } catch (error) {
+      console.error('Failed to fetch views:', error);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -124,8 +149,8 @@ export default function Announcements({ user }: { user: User | null }) {
       target_type: ann.target_type,
       target_value: ann.target_value,
       message: ann.message,
-      start_time: format(parseISO(ann.start_time), "yyyy-MM-dd'T'HH:mm"),
-      end_time: format(parseISO(ann.end_time), "yyyy-MM-dd'T'HH:mm")
+      start_time: ann.start_time ? format(parseISO(ann.start_time), "yyyy-MM-dd'T'HH:mm") : format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+      end_time: ann.end_time ? format(parseISO(ann.end_time), "yyyy-MM-dd'T'HH:mm") : format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm")
     });
     setShowForm(true);
   };
@@ -185,7 +210,7 @@ export default function Announcements({ user }: { user: User | null }) {
                     </span>
                     <span className="text-xs text-slate-400 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {format(parseISO(ann.created_at), 'dd/MM/yyyy HH:mm')}
+                      {safeFormat(ann.created_at, 'dd/MM/yyyy HH:mm')}
                     </span>
                     <span className="text-xs font-bold text-indigo-600">
                       Bởi: {ann.creator_name}
@@ -202,13 +227,13 @@ export default function Announcements({ user }: { user: User | null }) {
                       Đối tượng: <span className="font-bold text-slate-700">
                         {ann.target_type === 'All' ? 'Tất cả' : 
                          ann.target_type === 'Department' ? `Tổ: ${ann.target_value}` : 
-                         `Cá nhân: ${(ann.target_value || '').split(',').filter(v => v).map(id => employees.find(e => e.id === Number(id))?.name || id).join(', ')}`}
+                         `Cá nhân: ${(ann.target_value || '').split(',').filter(v => v).map(id => (Array.isArray(employees) ? employees : []).find(e => e.id === Number(id))?.name || id).join(', ')}`}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-4 h-4" />
                       Hiển thị: <span className="font-bold text-slate-700">
-                        {format(parseISO(ann.start_time), 'dd/MM HH:mm')} - {format(parseISO(ann.end_time), 'dd/MM HH:mm')}
+                        {safeFormat(ann.start_time, 'dd/MM HH:mm')} - {safeFormat(ann.end_time, 'dd/MM HH:mm')}
                       </span>
                     </div>
                   </div>
@@ -394,7 +419,7 @@ export default function Announcements({ user }: { user: User | null }) {
                     {v.viewed_at ? (
                       <div className="text-right">
                         <div className="text-green-600 font-bold text-[10px] uppercase tracking-wider">Đã xem</div>
-                        <div className="text-[9px] text-green-500">{format(parseISO(v.viewed_at), 'dd/MM HH:mm')}</div>
+                        <div className="text-[9px] text-green-500">{safeFormat(v.viewed_at, 'dd/MM HH:mm')}</div>
                       </div>
                     ) : (
                       <div className="text-slate-400 font-bold text-[10px] uppercase tracking-wider">Chưa xem</div>

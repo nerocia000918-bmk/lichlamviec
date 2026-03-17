@@ -23,9 +23,15 @@ export default function EmployeeList({ role }: { role: Role }) {
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
 
   const fetchEmployees = async () => {
-    const res = await fetch('/api/employees');
-    const data = await res.json();
-    setEmployees(data);
+    try {
+      const res = await fetch('/api/employees');
+      if (res.ok) {
+        const data = await res.json();
+        setEmployees(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+    }
   };
 
   useEffect(() => {

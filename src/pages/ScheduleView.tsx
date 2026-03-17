@@ -107,36 +107,42 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const isMonthLocked = lockedMonths.includes(currentMonthStr);
 
   const fetchData = async () => {
-    const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes] = await Promise.all([
-      fetch('/api/employees'),
-      fetch('/api/shifts'),
-      fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
-      fetch('/api/locked-months'),
-      fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${user.department}` : ''}`),
-      fetch('/api/tasks')
-    ]);
-    
-    const empData = await empRes.json();
-    const shiftData = await shiftRes.json();
-    const schedData = await schedRes.json();
-    const lockData = await lockRes.json();
-    const annData = await annRes.json();
-    const taskData = await taskRes.json();
-
-    setEmployees(empData);
-    setShifts(shiftData);
-    setSchedules(schedData);
-    setLockedMonths(lockData);
-    setAnnouncements(annData);
-    setTasks(taskData);
-
-    if (user) {
-      const active = annData.filter((a: Announcement) => !a.viewed_at);
-      setActiveAnnouncements(active);
+    try {
+      const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes] = await Promise.all([
+        fetch('/api/employees'),
+        fetch('/api/shifts'),
+        fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
+        fetch('/api/locked-months'),
+        fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${user.department}` : ''}`),
+        fetch('/api/tasks')
+      ]);
       
-      const pendingRes = await fetch(`/api/employees/${user.id}/pending-tasks`);
-      const pendingData = await pendingRes.json();
-      setPendingTasks(pendingData);
+      const empData = await empRes.json();
+      const shiftData = await shiftRes.json();
+      const schedData = await schedRes.json();
+      const lockData = await lockRes.json();
+      const annData = await annRes.json();
+      const taskData = await taskRes.json();
+
+      setEmployees(Array.isArray(empData) ? empData : []);
+      setShifts(Array.isArray(shiftData) ? shiftData : []);
+      setSchedules(Array.isArray(schedData) ? schedData : []);
+      setLockedMonths(Array.isArray(lockData) ? lockData : []);
+      setAnnouncements(Array.isArray(annData) ? annData : []);
+      setTasks(Array.isArray(taskData) ? taskData : []);
+
+      if (user) {
+        const active = (Array.isArray(annData) ? annData : []).filter((a: Announcement) => !a.viewed_at);
+        setActiveAnnouncements(active);
+        
+        const pendingRes = await fetch(`/api/employees/${user.id}/pending-tasks`);
+        if (pendingRes.ok) {
+          const pendingData = await pendingRes.json();
+          setPendingTasks(Array.isArray(pendingData) ? pendingData : []);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
     }
   };
 

@@ -41,12 +41,17 @@ export default function App() {
   const fetchPendingTasks = async (userId: number) => {
     try {
       const res = await fetch(`/api/employees/${userId}/pending-tasks`);
-      const data = await res.json();
-      setPendingTasks(data);
-      if (data.length > 0) {
-        setShowTaskNotification(true);
+      if (res.ok) {
+        const data = await res.json();
+        const tasks = Array.isArray(data) ? data : [];
+        setPendingTasks(tasks);
+        if (tasks.length > 0) {
+          setShowTaskNotification(true);
+        }
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error('Error fetching pending tasks:', err);
+    }
   };
 
   useEffect(() => {
@@ -92,7 +97,8 @@ export default function App() {
 
     try {
       const res = await fetch('/api/employees');
-      const allEmployees: any[] = await res.json();
+      const data = await res.json();
+      const allEmployees = Array.isArray(data) ? data : [];
       setEmployees(allEmployees); // Update local state as well
       
       const foundUser = allEmployees.find(emp => emp.code.trim().toLowerCase() === trimmedCode.toLowerCase());

@@ -73,6 +73,17 @@ export default function Tasks() {
     target_value: ''
   });
 
+  const safeFormat = (dateStr: string | null | undefined, formatStr: string) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const date = parseISO(dateStr);
+      if (isNaN(date.getTime())) return 'N/A';
+      return format(date, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
   const fetchData = async () => {
     try {
       const [taskRes, empRes] = await Promise.all([
@@ -312,7 +323,7 @@ export default function Tasks() {
                       </div>
                       <div className="flex items-center gap-1">
                         <Clock className="w-4 h-4" />
-                        <span>{format(parseISO(task.created_at), 'HH:mm dd/MM/yyyy')}</span>
+                        <span>{safeFormat(task.created_at, 'HH:mm dd/MM/yyyy')}</span>
                       </div>
                       <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-lg text-xs font-bold">
                         <Users className="w-3 h-3" />
@@ -563,7 +574,7 @@ export default function Tasks() {
                         </p>
                         {member.viewed_at && (
                           <p className="text-[10px] text-slate-400 mt-1">
-                            {format(parseISO(member.viewed_at), 'HH:mm dd/MM')}
+                            {safeFormat(member.viewed_at, 'HH:mm dd/MM')}
                           </p>
                         )}
                       </div>
@@ -576,7 +587,7 @@ export default function Tasks() {
                         </p>
                         {member.completed_at && (
                           <p className="text-[10px] text-slate-400 mt-1">
-                            {format(parseISO(member.completed_at), 'HH:mm dd/MM')}
+                            {safeFormat(member.completed_at, 'HH:mm dd/MM')}
                           </p>
                         )}
                       </div>
