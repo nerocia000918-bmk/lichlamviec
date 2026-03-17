@@ -71,6 +71,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [activeAnnouncements, setActiveAnnouncements] = useState<Announcement[]>([]);
   const [currentAnnIndex, setCurrentAnnIndex] = useState(0);
+  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
   
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('All');
@@ -132,6 +133,10 @@ export default function ScheduleView({ user }: { user: User | null }) {
     if (user) {
       const active = annData.filter((a: Announcement) => !a.viewed_at);
       setActiveAnnouncements(active);
+      
+      const pendingRes = await fetch(`/api/employees/${user.id}/pending-tasks`);
+      const pendingData = await pendingRes.json();
+      setPendingTasks(pendingData);
     }
   };
 
@@ -880,6 +885,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
                             )}
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                           >
+                            {pendingTasks.length > 0 && isSameDay(day, new Date()) && emp.id === user?.id && (
+                              <div className="absolute top-0 right-0 z-10">
+                                <div className="bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold animate-pulse shadow-sm">
+                                  !
+                                </div>
+                              </div>
+                            )}
                             {sched ? (
                               <div 
                                 className="h-full min-h-[60px] rounded-xl p-2 flex flex-col justify-between border border-black/5 shadow-sm"
@@ -934,7 +946,14 @@ export default function ScheduleView({ user }: { user: User | null }) {
           const isToday = isSameDay(day, new Date());
           
           return (
-            <div key={dateStr} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div key={dateStr} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
+              {pendingTasks.length > 0 && isToday && user && (
+                <div className="absolute top-2 right-2 z-10">
+                  <div className="bg-red-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold animate-pulse shadow-md">
+                    !
+                  </div>
+                </div>
+              )}
               <div className={clsx(
                 "p-3 border-b border-slate-100 flex items-center justify-between",
                 isToday ? "bg-indigo-50" : "bg-slate-50"

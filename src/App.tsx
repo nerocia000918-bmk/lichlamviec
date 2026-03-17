@@ -5,7 +5,7 @@
 
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, BookOpen, LogOut, User as UserIcon, Settings as SettingsIcon, CalendarMinus, Info } from 'lucide-react';
+import { Calendar, Users, BookOpen, LogOut, User as UserIcon, Settings as SettingsIcon, CalendarMinus, Info, AlertCircle } from 'lucide-react';
 import ScheduleView from './pages/ScheduleView';
 import EmployeeList from './pages/EmployeeList';
 import Guide from './pages/Guide';
@@ -34,6 +34,19 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [employees, setEmployees] = useState<any[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
+  const [showTaskNotification, setShowTaskNotification] = useState(false);
+
+  const fetchPendingTasks = async (userId: number) => {
+    try {
+      const res = await fetch(`/api/employees/${userId}/pending-tasks`);
+      const data = await res.json();
+      setPendingTasks(data);
+      if (data.length > 0) {
+        setShowTaskNotification(true);
+      }
+    } catch (err) {}
+  };
 
   useEffect(() => {
     fetch('/api/employees')
@@ -43,8 +56,10 @@ export default function App() {
 
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
       setShowLogin(false);
+      fetchPendingTasks(parsedUser.id);
     } else {
       const guest = localStorage.getItem('isGuest');
       if (guest) {
@@ -52,7 +67,15 @@ export default function App() {
         setShowLogin(false);
       }
     }
-  }, []);
+
+    socket.on('tasks:updated', () => {
+      if (user) fetchPendingTasks(user.id);
+    });
+
+    return () => {
+      socket.off('tasks:updated');
+    };
+  }, [user?.id]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,6 +120,7 @@ export default function App() {
         setUser(userWithNormalizedRole);
         setShowLogin(false);
         localStorage.setItem('user', JSON.stringify(userWithNormalizedRole));
+        fetchPendingTasks(userWithNormalizedRole.id);
       } else {
         setError(`Mã nhân viên "${trimmedCode}" không tồn tại! Vui lòng kiểm tra lại cột "code" trong Google Sheet.`);
       }
@@ -203,12 +227,10 @@ export default function App() {
                   <CalendarMinus className="w-5 h-5" />
                   <span className="text-[10px] md:text-sm font-medium">Xin nghỉ / OFF</span>
                 </Link>
-                {(currentRole === 'Admin' || currentRole === 'Tổ trưởng') && (
-                  <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
-                    <Info className="w-5 h-5" />
-                    <span className="text-[10px] md:text-sm font-medium">Thông báo</span>
-                  </Link>
-                )}
+                <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
+                  <Info className="w-5 h-5" />
+                  <span className="text-[10px] md:text-sm font-medium">Thông Báo và Nhiệm Vụ</span>
+                </Link>
                 {currentRole === 'Admin' && (
                   <>
                     <Link to="/employees" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
@@ -272,6 +294,44 @@ export default function App() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-4 md:p-8 pb-24 md:pb-8">
+          {showTaskNotification && pendingTasks.length > 0 && (
+            <div className="mb-6 animate-in slide-in-from-top duration-300">
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-4 shadow-sm">
+                <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-amber-800 font-bold">Bạn có {pendingTasks.length} nhiệm vụ chưa hoàn thành</h4>
+                  <ul className="mt-2 space-y-1">
+                    {pendingTasks.slice(0, 3).map(task => (
+                      <li key={task.id} className="text-amber-700 text-sm flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full"></span>
+                        {task.title}
+                      </li>
+                    ))}
+                    {pendingTasks.length > 3 && (
+                      <li className="text-amber-600 text-xs italic">...và {pendingTasks.length - 3} nhiệm vụ khác</li>
+                    )}
+                  </ul>
+                  <div className="mt-3 flex gap-3">
+                    <Link 
+                      to="/announcements" 
+                      onClick={() => setShowTaskNotification(false)}
+                      className="text-xs font-bold text-amber-700 hover:underline"
+                    >
+                      Xem chi tiết
+                    </Link>
+                    <button 
+                      onClick={() => setShowTaskNotification(false)}
+                      className="text-xs font-bold text-amber-500 hover:text-amber-600"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <Routes>
             <Route path="/" element={<ScheduleView user={user} />} />
             {!isGuest && (

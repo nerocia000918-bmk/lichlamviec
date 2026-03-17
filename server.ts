@@ -51,14 +51,15 @@ function triggerSync() {
       const announcements = db.prepare('SELECT * FROM announcements').all();
       const announcementViews = db.prepare('SELECT * FROM announcement_views').all();
       const leaveRequests = db.prepare('SELECT * FROM leave_requests').all();
-      const tasks = db.prepare('SELECT * FROM tasks').all();
+      const assignedTasks = db.prepare('SELECT * FROM assigned_tasks').all();
+      const taskMembers = db.prepare('SELECT * FROM task_members').all();
 
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           action: 'sync_all',
-          data: { employees, shifts, schedules, lockedMonths, announcements, announcementViews, leaveRequests, tasks }
+          data: { employees, shifts, schedules, lockedMonths, announcements, announcementViews, leaveRequests, assignedTasks, taskMembers }
         }),
         redirect: 'follow'
       });
@@ -397,6 +398,28 @@ db.exec(`
     name TEXT,
     color TEXT,
     text_color TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS assigned_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    description TEXT,
+    created_by INTEGER,
+    target_type TEXT, -- 'All', 'Department', 'Individual'
+    target_value TEXT, -- Department name or comma-separated IDs
+    created_at TEXT,
+    FOREIGN KEY(created_by) REFERENCES employees(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS task_members (
+    task_id INTEGER,
+    employee_id INTEGER,
+    viewed_at TEXT,
+    completed_at TEXT,
+    status TEXT DEFAULT 'Pending', -- 'Pending', 'Completed'
+    PRIMARY KEY(task_id, employee_id),
+    FOREIGN KEY(task_id) REFERENCES assigned_tasks(id),
+    FOREIGN KEY(employee_id) REFERENCES employees(id)
   );
 `);
 
@@ -795,6 +818,130 @@ async function startServer() {
     io.emit('leave_requests:updated');
     triggerSync();
     res.json({ success: true });
+  });
+
+  // Assigned Tasks Routes
+  app.get('/api/assigned-tasks', (req, res) => {
+    const tasks = db.prepare(`
+      SELECT t.*, e.name as creator_name 
+      FROM assigned_tasks t
+      JOIN employees e ON t.created_by = e.id
+      ORDER BY t.created_at DESC
+    `).all();
+    res.json(tasks);
+  });
+
+  app.get('/api/assigned-tasks/:id/members', (req, res) => {
+    const members = db.prepare(`
+      SELECT m.*, e.name, e.code, e.department
+      FROM task_members m
+      JOIN employees e ON m.employee_id = e.id
+      WHERE m.task_id = ?
+    `).all(req.params.id);
+    res.json(members);
+  });
+
+  app.post('/api/assigned-tasks', (req, res) => {
+    const { title, description, created_by, target_type, target_value } = req.body;
+    const created_at = new Date().toISOString();
+    
+    const result = db.prepare('INSERT INTO assigned_tasks (title, description, created_by, target_type, target_value, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(title, description, created_by, target_type, target_value, created_at);
+    
+    const taskId = result.lastInsertRowid;
+    
+    // Populate members
+    let targetEmployees: any[] = [];
+    if (target_type === 'All') {
+      targetEmployees = db.prepare('SELECT id FROM employees').all();
+    } else if (target_type === 'Department') {
+      targetEmployees = db.prepare('SELECT id FROM employees WHERE department = ?').all(target_value);
+    } else if (target_type === 'Individual') {
+      const ids = target_value.split(',').map(Number);
+      targetEmployees = ids.map(id => ({ id }));
+    }
+    
+    const insertMember = db.prepare('INSERT INTO task_members (task_id, employee_id) VALUES (?, ?)');
+    targetEmployees.forEach(emp => {
+      try {
+        insertMember.run(taskId, emp.id);
+      } catch (e) {}
+    });
+    
+    io?.emit('tasks:updated');
+    triggerSync();
+    res.json({ success: true, id: taskId });
+  });
+
+  app.put('/api/assigned-tasks/:id', (req, res) => {
+    const { title, description, target_type, target_value } = req.body;
+    const taskId = req.params.id;
+    
+    db.prepare('UPDATE assigned_tasks SET title = ?, description = ?, target_type = ?, target_value = ? WHERE id = ?')
+      .run(title, description, target_type, target_value, taskId);
+    
+    if (target_type === 'Individual') {
+      const newIds = target_value.split(',').map(Number);
+      const currentMembers = db.prepare('SELECT employee_id FROM task_members WHERE task_id = ?').all(taskId) as any[];
+      const currentIds = currentMembers.map(m => m.employee_id);
+      
+      const insertMember = db.prepare('INSERT INTO task_members (task_id, employee_id) VALUES (?, ?)');
+      newIds.forEach(id => {
+        if (!currentIds.includes(id)) {
+          try { insertMember.run(taskId, id); } catch (e) {}
+        }
+      });
+      
+      const deleteMember = db.prepare('DELETE FROM task_members WHERE task_id = ? AND employee_id = ?');
+      currentIds.forEach(id => {
+        if (!newIds.includes(id)) {
+          deleteMember.run(taskId, id);
+        }
+      });
+    }
+    
+    io?.emit('tasks:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.delete('/api/assigned-tasks/:id', (req, res) => {
+    db.prepare('DELETE FROM task_members WHERE task_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM assigned_tasks WHERE id = ?').run(req.params.id);
+    io?.emit('tasks:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.post('/api/tasks/:id/view', (req, res) => {
+    const { employee_id } = req.body;
+    const viewed_at = new Date().toISOString();
+    db.prepare('UPDATE task_members SET viewed_at = ? WHERE task_id = ? AND employee_id = ? AND viewed_at IS NULL')
+      .run(viewed_at, req.params.id, employee_id);
+    io?.emit('tasks:updated');
+    res.json({ success: true });
+  });
+
+  app.post('/api/tasks/:id/complete', (req, res) => {
+    const { employee_id, completed } = req.body;
+    const completed_at = completed ? new Date().toISOString() : null;
+    const status = completed ? 'Completed' : 'Pending';
+    db.prepare('UPDATE task_members SET completed_at = ?, status = ? WHERE task_id = ? AND employee_id = ?')
+      .run(completed_at, status, req.params.id, employee_id);
+    io?.emit('tasks:updated');
+    io?.emit('schedules:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.get('/api/employees/:id/pending-tasks', (req, res) => {
+    const tasks = db.prepare(`
+      SELECT t.*, m.status, m.viewed_at, m.completed_at
+      FROM assigned_tasks t
+      JOIN task_members m ON t.id = m.task_id
+      WHERE m.employee_id = ? AND m.status = 'Pending'
+    `).all(req.params.id);
+    res.json(tasks);
   });
 
   app.delete('/api/leave-requests/:id', (req, res) => {
