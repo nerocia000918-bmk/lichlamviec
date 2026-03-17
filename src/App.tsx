@@ -5,13 +5,14 @@
 
 import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
-import { Calendar, Users, BookOpen, LogOut, User as UserIcon, Settings as SettingsIcon, CalendarMinus, Info, AlertCircle } from 'lucide-react';
+import { Calendar, Users, BookOpen, LogOut, User as UserIcon, Settings as SettingsIcon, CalendarMinus, Info, AlertCircle, CheckCircle2 } from 'lucide-react';
 import ScheduleView from './pages/ScheduleView';
 import EmployeeList from './pages/EmployeeList';
 import Guide from './pages/Guide';
 import Settings from './pages/Settings';
 import LeaveRequests from './pages/LeaveRequests';
 import Announcements from './pages/Announcements';
+import Tasks from './pages/Tasks';
 import { io } from 'socket.io-client';
 
 export const socket = io();
@@ -229,7 +230,11 @@ export default function App() {
                 </Link>
                 <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
                   <Info className="w-5 h-5" />
-                  <span className="text-[10px] md:text-sm font-medium">Thông Báo và Nhiệm Vụ</span>
+                  <span className="text-[10px] md:text-sm font-medium">Thông báo</span>
+                </Link>
+                <Link to="/tasks" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span className="text-[10px] md:text-sm font-medium">Nhiệm vụ</span>
                 </Link>
                 {currentRole === 'Admin' && (
                   <>
@@ -315,7 +320,7 @@ export default function App() {
                   </ul>
                   <div className="mt-3 flex gap-3">
                     <Link 
-                      to="/announcements" 
+                      to="/tasks" 
                       onClick={() => setShowTaskNotification(false)}
                       className="text-xs font-bold text-amber-700 hover:underline"
                     >
@@ -338,6 +343,7 @@ export default function App() {
               <>
                 <Route path="/leave" element={<LeaveRequests user={user} />} />
                 <Route path="/announcements" element={<Announcements user={user} />} />
+                <Route path="/tasks" element={<Tasks />} />
                 <Route path="/employees" element={<EmployeeList role={currentRole} />} />
                 <Route path="/guide" element={<Guide />} />
                 <Route path="/settings" element={<Settings role={currentRole} user={user} />} />
