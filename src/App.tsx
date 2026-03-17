@@ -11,7 +11,7 @@ import EmployeeList from './pages/EmployeeList';
 import Guide from './pages/Guide';
 import Settings from './pages/Settings';
 import LeaveRequests from './pages/LeaveRequests';
-import Announcements from './pages/Announcements';
+import AnnouncementsAndTasks from './pages/AnnouncementsAndTasks';
 import { io } from 'socket.io-client';
 
 export const socket = io();
@@ -34,6 +34,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [employees, setEmployees] = useState<any[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<{ count: number, titles: string[] } | null>(null);
 
   useEffect(() => {
     fetch('/api/employees')
@@ -43,8 +44,10 @@ export default function App() {
 
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
       setShowLogin(false);
+      fetchPendingTasks(parsedUser.id);
     } else {
       const guest = localStorage.getItem('isGuest');
       if (guest) {
@@ -97,6 +100,7 @@ export default function App() {
         setUser(userWithNormalizedRole);
         setShowLogin(false);
         localStorage.setItem('user', JSON.stringify(userWithNormalizedRole));
+        fetchPendingTasks(userWithNormalizedRole.id);
       } else {
         setError(`Mã nhân viên "${trimmedCode}" không tồn tại! Vui lòng kiểm tra lại cột "code" trong Google Sheet.`);
       }
@@ -112,8 +116,21 @@ export default function App() {
     setLoginCode('');
     setPassword('');
     setError('');
+    setPendingTasks(null);
     localStorage.removeItem('user');
     localStorage.removeItem('isGuest');
+  };
+
+  const fetchPendingTasks = async (userId: number) => {
+    try {
+      const res = await fetch(`/api/assigned-tasks/pending-count?employee_id=${userId}`);
+      const data = await res.json();
+      if (data.count > 0) {
+        setPendingTasks(data);
+      }
+    } catch (err) {
+      console.error('Error fetching pending tasks:', err);
+    }
   };
 
   const currentRole: Role = user ? user.role : 'Nhân viên';
@@ -206,7 +223,13 @@ export default function App() {
                 {(currentRole === 'Admin' || currentRole === 'Tổ trưởng') && (
                   <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
                     <Info className="w-5 h-5" />
-                    <span className="text-[10px] md:text-sm font-medium">Thông báo</span>
+                    <span className="text-[10px] md:text-sm font-medium">Thông Báo & Nhiệm Vụ</span>
+                  </Link>
+                )}
+                {currentRole === 'Nhân viên' && (
+                   <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
+                    <Info className="w-5 h-5" />
+                    <span className="text-[10px] md:text-sm font-medium">Nhiệm Vụ</span>
                   </Link>
                 )}
                 {currentRole === 'Admin' && (
@@ -272,12 +295,44 @@ export default function App() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-4 md:p-8 pb-24 md:pb-8">
+          {pendingTasks && (
+            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300 border-t-8 border-indigo-600">
+                <div className="p-6">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                      <Info className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Nhiệm vụ mới!</h3>
+                      <p className="text-sm text-slate-500">Bạn có {pendingTasks.count} nhiệm vụ chưa hoàn thành</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2 mb-6 max-h-48 overflow-y-auto">
+                    {pendingTasks.titles.map((title, i) => (
+                      <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm font-bold text-slate-700">
+                        • {title}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <button 
+                    onClick={() => setPendingTasks(null)}
+                    className="w-full py-3 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
+                  >
+                    Đã hiểu
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <Routes>
             <Route path="/" element={<ScheduleView user={user} />} />
             {!isGuest && (
               <>
                 <Route path="/leave" element={<LeaveRequests user={user} />} />
-                <Route path="/announcements" element={<Announcements user={user} />} />
+                <Route path="/announcements" element={<AnnouncementsAndTasks user={user} />} />
                 <Route path="/employees" element={<EmployeeList role={currentRole} />} />
                 <Route path="/guide" element={<Guide />} />
                 <Route path="/settings" element={<Settings role={currentRole} user={user} />} />

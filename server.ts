@@ -52,13 +52,15 @@ function triggerSync() {
       const announcementViews = db.prepare('SELECT * FROM announcement_views').all();
       const leaveRequests = db.prepare('SELECT * FROM leave_requests').all();
       const tasks = db.prepare('SELECT * FROM tasks').all();
+      const assignedTasks = db.prepare('SELECT * FROM assigned_tasks').all();
+      const taskAssignments = db.prepare('SELECT * FROM task_assignments').all();
 
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           action: 'sync_all',
-          data: { employees, shifts, schedules, lockedMonths, announcements, announcementViews, leaveRequests, tasks }
+          data: { employees, shifts, schedules, lockedMonths, announcements, announcementViews, leaveRequests, tasks, assignedTasks, taskAssignments }
         }),
         redirect: 'follow'
       });
@@ -199,6 +201,14 @@ async function loadFromGoogleSheets() {
         if (data.tasks && data.tasks.length > 0) {
           db.prepare('DELETE FROM tasks').run();
         }
+        
+        if (data.assignedTasks && data.assignedTasks.length > 0) {
+          db.prepare('DELETE FROM assigned_tasks').run();
+        }
+        
+        if (data.taskAssignments && data.taskAssignments.length > 0) {
+          db.prepare('DELETE FROM task_assignments').run();
+        }
 
         if (sheetEmpCount > 0) {
           const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -282,6 +292,16 @@ async function loadFromGoogleSheets() {
           db.prepare('DELETE FROM tasks').run();
           const insertTask = db.prepare('INSERT INTO tasks (id, department, name, color, text_color) VALUES (?, ?, ?, ?, ?)');
           data.tasks.forEach((t: any) => insertTask.run(t.id, t.department, t.name, t.color, t.text_color));
+        }
+
+        if (data.assignedTasks && data.assignedTasks.length > 0) {
+          const insertAssigned = db.prepare('INSERT INTO assigned_tasks (id, title, description, created_by, created_at, target_type, target_value) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          data.assignedTasks.forEach((t: any) => insertAssigned.run(t.id, t.title, t.description, t.created_by, t.created_at, t.target_type, t.target_value));
+        }
+
+        if (data.taskAssignments && data.taskAssignments.length > 0) {
+          const insertAssign = db.prepare('INSERT INTO task_assignments (task_id, employee_id, status, viewed_at, completed_at) VALUES (?, ?, ?, ?, ?)');
+          data.taskAssignments.forEach((a: any) => insertAssign.run(a.task_id, a.employee_id, a.status, a.viewed_at, a.completed_at));
         }
       })();
       
@@ -397,6 +417,29 @@ db.exec(`
     name TEXT,
     color TEXT,
     text_color TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS assigned_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT,
+    description TEXT,
+    created_by INTEGER,
+    created_at TEXT,
+    due_date TEXT,
+    target_type TEXT, -- 'All', 'Department', 'Individual'
+    target_value TEXT, -- Department name or Employee ID(s)
+    FOREIGN KEY(created_by) REFERENCES employees(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS task_assignments (
+    task_id INTEGER,
+    employee_id INTEGER,
+    status TEXT DEFAULT 'Pending', -- 'Pending', 'Completed'
+    viewed_at TEXT,
+    completed_at TEXT,
+    PRIMARY KEY(task_id, employee_id),
+    FOREIGN KEY(task_id) REFERENCES assigned_tasks(id),
+    FOREIGN KEY(employee_id) REFERENCES employees(id)
   );
 `);
 
@@ -940,6 +983,158 @@ async function startServer() {
     io.emit('tasks:updated');
     triggerSync();
     res.json({ success: true });
+  });
+
+  // Assigned Tasks API
+  app.get('/api/assigned-tasks', (req, res) => {
+    const { employee_id, department, role } = req.query;
+    
+    let tasks;
+    if (role === 'Admin') {
+      tasks = db.prepare(`
+        SELECT t.*, e.name as creator_name
+        FROM assigned_tasks t
+        JOIN employees e ON t.created_by = e.id
+        ORDER BY t.created_at DESC
+      `).all();
+    } else if (role === 'Tổ trưởng') {
+      tasks = db.prepare(`
+        SELECT DISTINCT t.*, e.name as creator_name
+        FROM assigned_tasks t
+        JOIN employees e ON t.created_by = e.id
+        LEFT JOIN task_assignments ta ON t.id = ta.task_id
+        WHERE t.created_by = ? 
+        OR (t.target_type = 'Department' AND t.target_value = ?)
+        OR (t.target_type = 'Individual' AND ta.employee_id = ?)
+        ORDER BY t.created_at DESC
+      `).all(employee_id, department, employee_id);
+    } else {
+      tasks = db.prepare(`
+        SELECT t.*, e.name as creator_name, ta.status, ta.viewed_at, ta.completed_at
+        FROM assigned_tasks t
+        JOIN employees e ON t.created_by = e.id
+        JOIN task_assignments ta ON t.id = ta.task_id
+        WHERE ta.employee_id = ?
+        ORDER BY t.created_at DESC
+      `).all(employee_id);
+    }
+    res.json(tasks);
+  });
+
+  app.post('/api/assigned-tasks', (req, res) => {
+    const { title, description, target_type, target_value, created_by, employee_ids, due_date } = req.body;
+    const created_at = new Date().toISOString();
+    
+    const result = db.prepare(`
+      INSERT INTO assigned_tasks (title, description, target_type, target_value, created_by, created_at, due_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(title, description, target_type, target_value, created_by, created_at, due_date || null);
+    
+    const taskId = result.lastInsertRowid;
+    
+    if (employee_ids && Array.isArray(employee_ids)) {
+      const insertAssign = db.prepare('INSERT INTO task_assignments (task_id, employee_id) VALUES (?, ?)');
+      employee_ids.forEach((empId: number) => {
+        insertAssign.run(taskId, empId);
+      });
+    }
+    
+    io.emit('assigned_tasks:updated');
+    triggerSync();
+    res.json({ success: true, id: taskId });
+  });
+
+  app.put('/api/assigned-tasks/:id', (req, res) => {
+    const { title, description, target_type, target_value, employee_ids, due_date } = req.body;
+    const taskId = req.params.id;
+    
+    db.prepare(`
+      UPDATE assigned_tasks 
+      SET title = ?, description = ?, target_type = ?, target_value = ?, due_date = ?
+      WHERE id = ?
+    `).run(title, description, target_type, target_value, due_date || null, taskId);
+    
+    if (employee_ids && Array.isArray(employee_ids)) {
+      // Update assignments: remove old ones not in new list, add new ones
+      const currentAssignments = db.prepare('SELECT employee_id FROM task_assignments WHERE task_id = ?').all(taskId) as { employee_id: number }[];
+      const currentIds = currentAssignments.map(a => a.employee_id);
+      
+      const toRemove = currentIds.filter(id => !employee_ids.includes(id));
+      const toAdd = employee_ids.filter(id => !currentIds.includes(id));
+      
+      if (toRemove.length > 0) {
+        const removeStmt = db.prepare('DELETE FROM task_assignments WHERE task_id = ? AND employee_id = ?');
+        toRemove.forEach(id => removeStmt.run(taskId, id));
+      }
+      
+      if (toAdd.length > 0) {
+        const addStmt = db.prepare('INSERT INTO task_assignments (task_id, employee_id) VALUES (?, ?)');
+        toAdd.forEach(id => addStmt.run(taskId, id));
+      }
+    }
+    
+    io.emit('assigned_tasks:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.delete('/api/assigned-tasks/:id', (req, res) => {
+    const taskId = req.params.id;
+    db.transaction(() => {
+      db.prepare('DELETE FROM task_assignments WHERE task_id = ?').run(taskId);
+      db.prepare('DELETE FROM assigned_tasks WHERE id = ?').run(taskId);
+    })();
+    
+    io.emit('assigned_tasks:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.post('/api/assigned-tasks/:id/view', (req, res) => {
+    const { employee_id } = req.body;
+    const viewed_at = new Date().toISOString();
+    db.prepare('UPDATE task_assignments SET viewed_at = ? WHERE task_id = ? AND employee_id = ? AND viewed_at IS NULL')
+      .run(viewed_at, req.params.id, employee_id);
+    io.emit('assigned_tasks:updated');
+    res.json({ success: true });
+  });
+
+  app.post('/api/assigned-tasks/:id/complete', (req, res) => {
+    const { employee_id, completed } = req.body;
+    const completed_at = completed ? new Date().toISOString() : null;
+    const status = completed ? 'Completed' : 'Pending';
+    
+    db.prepare('UPDATE task_assignments SET status = ?, completed_at = ? WHERE task_id = ? AND employee_id = ?')
+      .run(status, completed_at, req.params.id, employee_id);
+    
+    io.emit('assigned_tasks:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.get('/api/assigned-tasks/:id/status', (req, res) => {
+    const status = db.prepare(`
+      SELECT e.id, e.name, e.code, e.department, ta.status, ta.viewed_at, ta.completed_at
+      FROM task_assignments ta
+      JOIN employees e ON ta.employee_id = e.id
+      WHERE ta.task_id = ?
+    `).all(req.params.id);
+    res.json(status);
+  });
+
+  app.get('/api/assigned-tasks/pending-count', (req, res) => {
+    const { employee_id } = req.query;
+    const result = db.prepare(`
+      SELECT COUNT(*) as count, GROUP_CONCAT(t.title, '|') as titles
+      FROM task_assignments ta
+      JOIN assigned_tasks t ON ta.task_id = t.id
+      WHERE ta.employee_id = ? AND ta.status = 'Pending'
+    `).get(employee_id) as { count: number, titles: string | null };
+    
+    res.json({
+      count: result.count,
+      titles: result.titles ? result.titles.split('|') : []
+    });
   });
 
   app.post('/api/change-password', (req, res) => {

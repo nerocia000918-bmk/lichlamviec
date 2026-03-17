@@ -70,6 +70,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const [lockedMonths, setLockedMonths] = useState<string[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [activeAnnouncements, setActiveAnnouncements] = useState<Announcement[]>([]);
+  const [assignedTasks, setAssignedTasks] = useState<any[]>([]);
   const [currentAnnIndex, setCurrentAnnIndex] = useState(0);
   
   const [search, setSearch] = useState('');
@@ -106,32 +107,43 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const isMonthLocked = lockedMonths.includes(currentMonthStr);
 
   const fetchData = async () => {
-    const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes] = await Promise.all([
-      fetch('/api/employees'),
-      fetch('/api/shifts'),
-      fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
-      fetch('/api/locked-months'),
-      fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${user.department}` : ''}`),
-      fetch('/api/tasks')
-    ]);
-    
-    const empData = await empRes.json();
-    const shiftData = await shiftRes.json();
-    const schedData = await schedRes.json();
-    const lockData = await lockRes.json();
-    const annData = await annRes.json();
-    const taskData = await taskRes.json();
+    try {
+      const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes, assignedTaskRes] = await Promise.all([
+        fetch('/api/employees'),
+        fetch('/api/shifts'),
+        fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
+        fetch('/api/locked-months'),
+        fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${encodeURIComponent(user.department)}` : ''}`),
+        fetch('/api/tasks'),
+        fetch(`/api/assigned-tasks?employee_id=${user?.id || ''}&department=${encodeURIComponent(user?.department || '')}&role=${encodeURIComponent(user?.role || 'Nhân viên')}`)
+      ]);
+      
+      if (!empRes.ok || !shiftRes.ok || !schedRes.ok || !lockRes.ok || !annRes.ok || !taskRes.ok || !assignedTaskRes.ok) {
+        throw new Error('Fetch failed');
+      }
+      
+      const empData = await empRes.json();
+      const shiftData = await shiftRes.json();
+      const schedData = await schedRes.json();
+      const lockData = await lockRes.json();
+      const annData = await annRes.json();
+      const taskData = await taskRes.json();
+      const assignedTaskData = await assignedTaskRes.json();
 
-    setEmployees(empData);
-    setShifts(shiftData);
-    setSchedules(schedData);
-    setLockedMonths(lockData);
-    setAnnouncements(annData);
-    setTasks(taskData);
+      setEmployees(empData);
+      setShifts(shiftData);
+      setSchedules(schedData);
+      setLockedMonths(lockData);
+      setAnnouncements(annData);
+      setTasks(taskData);
+      setAssignedTasks(Array.isArray(assignedTaskData) ? assignedTaskData : []);
 
-    if (user) {
-      const active = annData.filter((a: Announcement) => !a.viewed_at);
-      setActiveAnnouncements(active);
+      if (user) {
+        const active = annData.filter((a: Announcement) => !a.viewed_at);
+        setActiveAnnouncements(active);
+      }
+    } catch (err) {
+      console.error('Error fetching schedule data:', err);
     }
   };
 
@@ -142,12 +154,14 @@ export default function ScheduleView({ user }: { user: User | null }) {
     socket.on('settings:updated', fetchData);
     socket.on('announcements:updated', fetchData);
     socket.on('tasks:updated', fetchData);
+    socket.on('assigned_tasks:updated', fetchData);
     return () => {
       socket.off('schedules:updated', fetchData);
       socket.off('shifts:updated', fetchData);
       socket.off('settings:updated', fetchData);
       socket.off('announcements:updated', fetchData);
       socket.off('tasks:updated', fetchData);
+      socket.off('assigned_tasks:updated', fetchData);
     };
   }, [currentDate]);
 
@@ -805,10 +819,10 @@ export default function ScheduleView({ user }: { user: User | null }) {
             {announcements.map(ann => (
               <div key={ann.id} className="bg-white p-3 rounded-xl border border-amber-100 text-sm text-slate-700 flex justify-between items-start">
                 <div>
-                  <span className="font-bold text-amber-700 mr-2">[{ann.department === 'All' ? 'Toàn thể' : ann.department}]</span>
+                  <span className="font-bold text-amber-700 mr-2">[{ann.target_type === 'All' ? 'Toàn thể' : ann.target_value}]</span>
                   {ann.message}
                 </div>
-                {(role === 'Admin' || (role === 'Tổ trưởng' && user?.department === ann.department)) && (
+                {(role === 'Admin' || (role === 'Tổ trưởng' && user?.department === ann.target_value)) && (
                   <button 
                     onClick={() => deleteAnnouncement(ann.id)}
                     className="text-red-500 hover:text-red-700 p-1"
@@ -871,6 +885,12 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
                         
+                        const hasPendingTask = assignedTasks.some(t => 
+                          t.employee_id === emp.id && 
+                          t.due_date === dateStr && 
+                          !t.completed_at
+                        );
+                        
                         return (
                           <td 
                             key={dateStr} 
@@ -880,6 +900,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
                             )}
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                           >
+                            {hasPendingTask && (
+                              <div className="absolute top-1 right-1 z-10">
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm animate-bounce">
+                                  !
+                                </span>
+                              </div>
+                            )}
                             {sched ? (
                               <div 
                                 className="h-full min-h-[60px] rounded-xl p-2 flex flex-col justify-between border border-black/5 shadow-sm"
@@ -971,18 +998,31 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
 
+                        const hasPendingTask = assignedTasks.some(t => 
+                          t.employee_id === emp.id && 
+                          t.due_date === dateStr && 
+                          !t.completed_at
+                        );
+
                         return (
                           <div 
                             key={emp.id} 
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                             className={clsx(
-                              "p-3 flex items-center justify-between",
+                              "p-3 flex items-center justify-between relative",
                               editable ? "active:bg-slate-50 cursor-pointer" : ""
                             )}
                           >
-                            <div>
-                              <div className="font-medium text-slate-800 text-sm">{emp.name}</div>
-                              <div className="text-xs text-slate-500 mt-0.5">{emp.code}</div>
+                            <div className="flex items-center gap-3">
+                              {hasPendingTask && (
+                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-bounce">
+                                  !
+                                </span>
+                              )}
+                              <div>
+                                <div className="font-medium text-slate-800 text-sm">{emp.name}</div>
+                                <div className="text-xs text-slate-500 mt-0.5">{emp.code}</div>
+                              </div>
                             </div>
                             
                             {sched ? (
