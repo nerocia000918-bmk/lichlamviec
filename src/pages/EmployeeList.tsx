@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { socket } from '../socket';
-import { Role } from '../types';
+import { Role, socket } from '../App';
 import { Search, UserPlus, Edit2, Trash2 } from 'lucide-react';
 
 interface Employee {
@@ -24,15 +23,9 @@ export default function EmployeeList({ role }: { role: Role }) {
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
 
   const fetchEmployees = async () => {
-    try {
-      const res = await fetch('/api/employees');
-      if (res.ok) {
-        const data = await res.json();
-        setEmployees(Array.isArray(data) ? data : []);
-      }
-    } catch (error) {
-      console.error('Error fetching employees:', error);
-    }
+    const res = await fetch('/api/employees');
+    const data = await res.json();
+    setEmployees(data);
   };
 
   useEffect(() => {

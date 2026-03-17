@@ -3,8 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
 import { format, addDays, startOfWeek, subWeeks, isBefore, addHours, parseISO, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { socket } from '../socket';
-import { User } from '../types';
+import { User, socket } from '../App';
 import { ChevronLeft, ChevronRight, Copy, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, Wand2, X, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -72,7 +71,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [activeAnnouncements, setActiveAnnouncements] = useState<Announcement[]>([]);
   const [currentAnnIndex, setCurrentAnnIndex] = useState(0);
-  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
   
   const [search, setSearch] = useState('');
   const [deptFilter, setDeptFilter] = useState('All');
@@ -108,42 +106,32 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const isMonthLocked = lockedMonths.includes(currentMonthStr);
 
   const fetchData = async () => {
-    try {
-      const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes] = await Promise.all([
-        fetch('/api/employees'),
-        fetch('/api/shifts'),
-        fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
-        fetch('/api/locked-months'),
-        fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${user.department}` : ''}`),
-        fetch('/api/tasks')
-      ]);
-      
-      const empData = await empRes.json();
-      const shiftData = await shiftRes.json();
-      const schedData = await schedRes.json();
-      const lockData = await lockRes.json();
-      const annData = await annRes.json();
-      const taskData = await taskRes.json();
+    const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes] = await Promise.all([
+      fetch('/api/employees'),
+      fetch('/api/shifts'),
+      fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
+      fetch('/api/locked-months'),
+      fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${user.department}` : ''}`),
+      fetch('/api/tasks')
+    ]);
+    
+    const empData = await empRes.json();
+    const shiftData = await shiftRes.json();
+    const schedData = await schedRes.json();
+    const lockData = await lockRes.json();
+    const annData = await annRes.json();
+    const taskData = await taskRes.json();
 
-      setEmployees(Array.isArray(empData) ? empData : []);
-      setShifts(Array.isArray(shiftData) ? shiftData : []);
-      setSchedules(Array.isArray(schedData) ? schedData : []);
-      setLockedMonths(Array.isArray(lockData) ? lockData : []);
-      setAnnouncements(Array.isArray(annData) ? annData : []);
-      setTasks(Array.isArray(taskData) ? taskData : []);
+    setEmployees(empData);
+    setShifts(shiftData);
+    setSchedules(schedData);
+    setLockedMonths(lockData);
+    setAnnouncements(annData);
+    setTasks(taskData);
 
-      if (user) {
-        const active = (Array.isArray(annData) ? annData : []).filter((a: Announcement) => !a.viewed_at);
-        setActiveAnnouncements(active);
-        
-        const pendingRes = await fetch(`/api/employees/${user.id}/pending-tasks`);
-        if (pendingRes.ok) {
-          const pendingData = await pendingRes.json();
-          setPendingTasks(Array.isArray(pendingData) ? pendingData : []);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching data:', error);
+    if (user) {
+      const active = annData.filter((a: Announcement) => !a.viewed_at);
+      setActiveAnnouncements(active);
     }
   };
 
@@ -892,13 +880,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
                             )}
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                           >
-                            {pendingTasks.length > 0 && isSameDay(day, new Date()) && emp.id === user?.id && (
-                              <div className="absolute top-0 right-0 z-10">
-                                <div className="bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold animate-pulse shadow-sm">
-                                  !
-                                </div>
-                              </div>
-                            )}
                             {sched ? (
                               <div 
                                 className="h-full min-h-[60px] rounded-xl p-2 flex flex-col justify-between border border-black/5 shadow-sm"
@@ -921,7 +902,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max max-w-[200px] bg-slate-800 text-white text-xs rounded-lg py-1.5 px-3 opacity-0 group-hover/cell:opacity-100 pointer-events-none transition-opacity z-30 shadow-xl">
                                   <div className="font-bold mb-1">{emp.name}</div>
                                   <div>Ca: {sched.shift_name} ({sched.start_time} - {sched.end_time})</div>
-                                  {sched.task && sched.task !== 'Không' && <div>Công việc: {sched.task}</div>}
+                                  {sched.task && sched.task !== 'Không' && <div>Nhiệm vụ: {sched.task}</div>}
                                   {sched.note && <div className="mt-1 text-slate-300 italic border-t border-slate-600 pt-1">Ghi chú: {sched.note}</div>}
                                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
                                 </div>
@@ -953,14 +934,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
           const isToday = isSameDay(day, new Date());
           
           return (
-            <div key={dateStr} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
-              {pendingTasks.length > 0 && isToday && user && (
-                <div className="absolute top-2 right-2 z-10">
-                  <div className="bg-red-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold animate-pulse shadow-md">
-                    !
-                  </div>
-                </div>
-              )}
+            <div key={dateStr} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
               <div className={clsx(
                 "p-3 border-b border-slate-100 flex items-center justify-between",
                 isToday ? "bg-indigo-50" : "bg-slate-50"
@@ -1096,7 +1070,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
 
               <div>
                 <div className="flex justify-between items-center mb-2">
-                  <label className="block text-sm font-medium text-slate-700">Công việc trực ca</label>
+                  <label className="block text-sm font-medium text-slate-700">Nhiệm vụ đặc biệt</label>
                   {(role === 'Admin' || role === 'Tổ trưởng') && (
                     <button 
                       onClick={() => {
@@ -1138,7 +1112,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                   <div className="flex gap-2">
                     <input 
                       type="text"
-                      placeholder="Thêm nhanh công việc..."
+                      placeholder="Thêm nhanh nhiệm vụ..."
                       className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500"
                       onKeyDown={async (e) => {
                         if (e.key === 'Enter') {

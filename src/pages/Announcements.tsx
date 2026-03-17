@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { format, parseISO, addDays } from 'date-fns';
-import { socket } from '../socket';
-import { User } from '../types';
-import { Plus, Trash2, Edit2, CheckCircle2, Users, Clock, X, AlertCircle } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
+import { User, socket } from '../App';
+import { Plus, Trash2, Edit2, CheckCircle2, Info, Users, User as UserIcon, Clock, X } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Announcement {
@@ -26,16 +25,9 @@ interface ViewStatus {
   viewed_at: string | null;
 }
 
-interface Employee {
-  id: number;
-  name: string;
-  code: string;
-  department: string;
-}
-
 export default function Announcements({ user }: { user: User | null }) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [showViews, setShowViews] = useState<number | null>(null);
   const [viewStatus, setViewStatus] = useState<ViewStatus[]>([]);
@@ -50,59 +42,41 @@ export default function Announcements({ user }: { user: User | null }) {
     end_time: format(addDays(new Date(), 7), "yyyy-MM-dd'T'HH:mm")
   });
 
-  const role = user?.role || 'Guest';
-
-  const safeFormat = (dateStr: string | null | undefined, formatStr: string) => {
-    if (!dateStr) return 'N/A';
-    try {
-      const date = parseISO(dateStr);
-      if (isNaN(date.getTime())) return 'N/A';
-      return format(date, formatStr);
-    } catch (e) {
-      return 'N/A';
+  const toggleTargetValue = (val: string) => {
+    const currentValues = formData.target_value === 'All' ? [] : formData.target_value.split(',').filter(v => v);
+    let newValues;
+    if (currentValues.includes(val)) {
+      newValues = currentValues.filter(v => v !== val);
+    } else {
+      newValues = [...currentValues, val];
     }
+    setFormData({ ...formData, target_value: newValues.join(',') });
   };
 
+  const role = user?.role || 'Guest';
+  const isGuest = !user;
+
   const fetchData = async () => {
-    try {
-      const [annRes, empRes] = await Promise.all([
-        fetch('/api/announcements'),
-        fetch('/api/employees')
-      ]);
-      
-      if (annRes.ok) {
-        const data = await annRes.json();
-        setAnnouncements(Array.isArray(data) ? data : []);
-      }
-      if (empRes.ok) {
-        const data = await empRes.json();
-        setEmployees(Array.isArray(data) ? data : []);
-      }
-    } catch (error) {
-      console.error('Failed to fetch announcements:', error);
-    }
+    const [annRes, empRes] = await Promise.all([
+      fetch('/api/announcements'),
+      fetch('/api/employees')
+    ]);
+    setAnnouncements(await annRes.json());
+    setEmployees(await empRes.json());
   };
 
   useEffect(() => {
     fetchData();
-    const handleUpdate = () => fetchData();
-    socket.on('announcements:updated', handleUpdate);
+    socket.on('announcements:updated', fetchData);
     return () => {
-      socket.off('announcements:updated', handleUpdate);
+      socket.off('announcements:updated', fetchData);
     };
   }, []);
 
   const fetchViews = async (id: number) => {
-    try {
-      const res = await fetch(`/api/announcements/${id}/views`);
-      if (res.ok) {
-        const data = await res.json();
-        setViewStatus(Array.isArray(data) ? data : []);
-        setShowViews(id);
-      }
-    } catch (error) {
-      console.error('Failed to fetch views:', error);
-    }
+    const res = await fetch(`/api/announcements/${id}/views`);
+    setViewStatus(await res.json());
+    setShowViews(id);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -117,7 +91,7 @@ export default function Announcements({ user }: { user: User | null }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...formData,
-        type: role === 'Admin' ? 'Highlight 1' : 'Highlight 2',
+        type: (role as string) === 'Admin' ? 'Highlight 1' : 'Highlight 2',
         created_by: user.id
       })
     });
@@ -129,7 +103,7 @@ export default function Announcements({ user }: { user: User | null }) {
   const resetForm = () => {
     setFormData({
       id: null,
-      type: role === 'Admin' ? 'Highlight 1' : 'Highlight 2',
+      type: (role as string) === 'Admin' ? 'Highlight 1' : 'Highlight 2',
       target_type: 'All',
       target_value: 'All',
       message: '',
@@ -144,73 +118,49 @@ export default function Announcements({ user }: { user: User | null }) {
   };
 
   const handleEdit = (ann: Announcement) => {
-    const now = new Date();
-    const nextWeek = addDays(now, 7);
-    
-    const safeParse = (str: string | null | undefined, fallback: Date) => {
-      if (!str) return fallback;
-      const d = parseISO(str);
-      return isNaN(d.getTime()) ? fallback : d;
-    };
-
     setFormData({
       id: ann.id,
       type: ann.type,
       target_type: ann.target_type,
       target_value: ann.target_value,
       message: ann.message,
-      start_time: format(safeParse(ann.start_time, now), "yyyy-MM-dd'T'HH:mm"),
-      end_time: format(safeParse(ann.end_time, nextWeek), "yyyy-MM-dd'T'HH:mm")
+      start_time: format(parseISO(ann.start_time), "yyyy-MM-dd'T'HH:mm"),
+      end_time: format(parseISO(ann.end_time), "yyyy-MM-dd'T'HH:mm")
     });
     setShowForm(true);
   };
 
-  const toggleTargetValue = (val: string) => {
-    const currentValues = formData.target_value === 'All' ? [] : formData.target_value.split(',').filter(v => v);
-    let newValues;
-    if (currentValues.includes(val)) {
-      newValues = currentValues.filter(v => v !== val);
-    } else {
-      newValues = [...currentValues, val];
-    }
-    setFormData({ ...formData, target_value: newValues.join(',') });
-  };
+  if (isGuest || role === 'Nhân viên') {
+    return <div className="p-8 text-center text-slate-500">Bạn không có quyền truy cập trang này.</div>;
+  }
 
-  const departments = Array.isArray(employees) ? Array.from(new Set(employees.map(e => e.department))).filter(Boolean) as string[] : [];
+  const departments: string[] = Array.from(new Set(employees.map(e => e.department as string)));
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Thông Báo</h2>
-          <p className="text-slate-500">Thông tin quan trọng từ ban quản lý</p>
+          <h2 className="text-2xl font-bold text-slate-800">Quản lý thông báo</h2>
+          <p className="text-slate-500">Tạo và theo dõi thông báo nổi bật</p>
         </div>
-        
-        {(role === 'Admin' || role === 'Tổ trưởng') && (
-          <button 
-            onClick={() => { resetForm(); setShowForm(true); }}
-            className="bg-indigo-600 text-white px-6 py-3 rounded-2xl flex items-center gap-2 font-bold hover:bg-indigo-700 transition-all shadow-lg active:scale-95"
-          >
-            <Plus className="w-5 h-5" />
-            Tạo thông báo mới
-          </button>
-        )}
+        <button 
+          onClick={() => { resetForm(); setShowForm(true); }}
+          className="bg-indigo-600 text-white px-4 py-2 rounded-xl flex items-center gap-2 font-bold hover:bg-indigo-700 transition-all shadow-lg"
+        >
+          <Plus className="w-5 h-5" />
+          Tạo thông báo mới
+        </button>
       </div>
 
       <div className="grid grid-cols-1 gap-4">
         {announcements.map(ann => {
-          const canManage = role === 'Admin' || ann.created_by === user?.id;
-          const targetValues = (ann.target_value || '').split(',').filter(v => v);
-          const isTarget = ann.target_type === 'All' || 
-                           (ann.target_type === 'Department' && targetValues.includes(user?.department || '')) ||
-                           (ann.target_type === 'Individual' && targetValues.includes(user?.id?.toString() || ''));
-
-          if (!canManage && !isTarget) return null;
+          const canManage = (role as string) === 'Admin' || ann.created_by === user?.id;
+          if (!canManage && (role as string) !== 'Admin') return null;
 
           return (
-            <div key={ann.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-all">
-              <div className="p-6 flex flex-col md:flex-row justify-between gap-6">
-                <div className="flex-1 space-y-4">
+            <div key={ann.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-5 flex flex-col md:flex-row justify-between gap-4">
+                <div className="flex-1 space-y-3">
                   <div className="flex items-center gap-3">
                     <span className={clsx(
                       "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider",
@@ -220,94 +170,78 @@ export default function Announcements({ user }: { user: User | null }) {
                     </span>
                     <span className="text-xs text-slate-400 flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {safeFormat(ann.created_at, 'dd/MM/yyyy HH:mm')}
+                      {format(parseISO(ann.created_at), 'dd/MM/yyyy HH:mm')}
                     </span>
                     <span className="text-xs font-bold text-indigo-600">
                       Bởi: {ann.creator_name}
                     </span>
                   </div>
                   
-                  <div className="text-slate-800 font-medium whitespace-pre-wrap leading-relaxed text-lg">
+                  <div className="text-slate-800 font-medium whitespace-pre-wrap">
                     {ann.message}
                   </div>
 
-                  <div className="flex flex-wrap gap-4 text-xs text-slate-500 pt-2 border-t border-slate-50">
+                  <div className="flex flex-wrap gap-4 text-xs text-slate-500 pt-2">
                     <div className="flex items-center gap-1.5">
                       <Users className="w-4 h-4" />
                       Đối tượng: <span className="font-bold text-slate-700">
                         {ann.target_type === 'All' ? 'Tất cả' : 
                          ann.target_type === 'Department' ? `Tổ: ${ann.target_value}` : 
-                         `Cá nhân: ${(ann.target_value || '').split(',').filter(v => v).map(id => (Array.isArray(employees) ? employees : []).find(e => e.id === Number(id))?.name || id).join(', ')}`}
+                         `Cá nhân: ${ann.target_value.split(',').map(id => employees.find(e => e.id === Number(id))?.name || id).join(', ')}`}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-4 h-4" />
                       Hiển thị: <span className="font-bold text-slate-700">
-                        {safeFormat(ann.start_time, 'dd/MM HH:mm')} - {safeFormat(ann.end_time, 'dd/MM HH:mm')}
+                        {format(parseISO(ann.start_time), 'dd/MM HH:mm')} - {format(parseISO(ann.end_time), 'dd/MM HH:mm')}
                       </span>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex md:flex-col justify-end gap-2">
-                  {canManage && (
+                  <button 
+                    onClick={() => fetchViews(ann.id)}
+                    className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Xem ai đã xem
+                  </button>
+                  <div className="flex gap-2">
                     <button 
-                      onClick={() => fetchViews(ann.id)}
-                      className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all"
+                      onClick={() => handleEdit(ann)}
+                      className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-all"
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Xác nhận xem
+                      <Edit2 className="w-4 h-4" />
                     </button>
-                  )}
-                  {canManage && (
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => handleEdit(ann)}
-                        className="flex-1 p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition-all flex items-center justify-center"
-                      >
-                        <Edit2 className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={() => handleDelete(ann.id)}
-                        className="flex-1 p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all flex items-center justify-center"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </div>
-                  )}
+                    <button 
+                      onClick={() => handleDelete(ann.id)}
+                      className="p-2 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           );
         })}
-
-        {announcements.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
-            <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="w-10 h-10 text-slate-300" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-2">Chưa có thông báo nào</h3>
-            <p className="text-slate-500">Các thông báo quan trọng sẽ xuất hiện tại đây</p>
-          </div>
-        )}
       </div>
 
-      {/* Announcement Form Modal */}
+      {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[150] p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-xl font-bold text-slate-800 uppercase tracking-tight">
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">
                 {formData.id ? 'Sửa thông báo' : 'Tạo thông báo mới'}
               </h3>
-              <button onClick={() => setShowForm(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-                <X className="w-6 h-6 text-slate-500" />
-              </button>
+              <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6" /></button>
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 space-y-5">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Đối tượng nhận thông báo</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-2">Đối tượng nhận thông báo</label>
                 <div className="flex gap-2 mb-3">
                   {['All', 'Department', 'Individual'].map(t => (
                     <button
@@ -317,7 +251,7 @@ export default function Announcements({ user }: { user: User | null }) {
                       className={clsx(
                         "flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all border",
                         formData.target_type === t 
-                          ? "bg-indigo-600 border-indigo-600 text-white shadow-md" 
+                          ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-100" 
                           : "bg-white border-slate-200 text-slate-600 hover:border-indigo-300"
                       )}
                     >
@@ -358,10 +292,13 @@ export default function Announcements({ user }: { user: User | null }) {
                     )}
                   </div>
                 )}
+                {formData.target_type !== 'All' && !formData.target_value && (
+                  <p className="text-[10px] text-red-500 mt-1 font-bold italic">* Vui lòng chọn ít nhất một đối tượng</p>
+                )}
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Nội dung thông báo</label>
+                <label className="block text-xs font-black text-slate-500 uppercase mb-2">Nội dung thông báo</label>
                 <textarea 
                   required
                   rows={4}
@@ -374,7 +311,7 @@ export default function Announcements({ user }: { user: User | null }) {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Thời gian bắt đầu</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-2">Thời gian bắt đầu</label>
                   <input 
                     type="datetime-local"
                     required
@@ -384,7 +321,7 @@ export default function Announcements({ user }: { user: User | null }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Thời gian kết thúc</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-2">Thời gian kết thúc</label>
                   <input 
                     type="datetime-local"
                     required
@@ -396,8 +333,17 @@ export default function Announcements({ user }: { user: User | null }) {
               </div>
 
               <div className="pt-4 flex gap-3">
-                <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all">Hủy bỏ</button>
-                <button type="submit" className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg active:scale-95">
+                <button 
+                  type="button" 
+                  onClick={() => setShowForm(false)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all"
+                >
+                  Hủy bỏ
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                >
                   {formData.id ? 'Cập nhật' : 'Đăng thông báo'}
                 </button>
               </div>
@@ -411,8 +357,8 @@ export default function Announcements({ user }: { user: User | null }) {
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[150] p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-xl font-bold text-slate-800 uppercase tracking-tight">Trạng thái xác nhận</h3>
-              <button onClick={() => setShowViews(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X className="w-6 h-6 text-slate-500" /></button>
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Trạng thái xác nhận</h3>
+              <button onClick={() => setShowViews(null)} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6" /></button>
             </div>
             
             <div className="p-6 max-h-[500px] overflow-y-auto">
@@ -424,15 +370,15 @@ export default function Announcements({ user }: { user: User | null }) {
                   )}>
                     <div>
                       <div className="font-bold text-slate-800 text-sm">{v.name}</div>
-                      <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{v.department}</div>
+                      <div className="text-[10px] text-slate-500 uppercase font-black tracking-wider">{v.department}</div>
                     </div>
                     {v.viewed_at ? (
                       <div className="text-right">
-                        <div className="text-green-600 font-bold text-[10px] uppercase tracking-wider">Đã xem</div>
-                        <div className="text-[9px] text-green-500">{safeFormat(v.viewed_at, 'dd/MM HH:mm')}</div>
+                        <div className="text-green-600 font-black text-[10px] uppercase tracking-wider">Đã xem</div>
+                        <div className="text-[9px] text-green-500">{format(parseISO(v.viewed_at), 'dd/MM HH:mm')}</div>
                       </div>
                     ) : (
-                      <div className="text-slate-400 font-bold text-[10px] uppercase tracking-wider">Chưa xem</div>
+                      <div className="text-slate-400 font-black text-[10px] uppercase tracking-wider">Chưa xem</div>
                     )}
                   </div>
                 ))}
@@ -443,4 +389,10 @@ export default function Announcements({ user }: { user: User | null }) {
       )}
     </div>
   );
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
 }
