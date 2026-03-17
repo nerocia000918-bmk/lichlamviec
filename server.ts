@@ -519,16 +519,18 @@ async function startServer() {
     cors: { origin: '*' }
   });
 
+  // Redirect old routes to new ones - Move to top of middleware stack
+  app.use((req, res, next) => {
+    if (req.path === '/announcements' || req.path === '/announcements/') {
+      return res.redirect(301, '/thong-bao');
+    }
+    if (req.path === '/tasks' || req.path === '/tasks/') {
+      return res.redirect(301, '/nhiem-vu');
+    }
+    next();
+  });
+
   app.use(express.json());
-
-  // Redirect old routes to new ones
-  app.get(['/announcements', '/announcements/'], (req, res) => {
-    res.redirect('/thong-bao');
-  });
-
-  app.get(['/tasks', '/tasks/'], (req, res) => {
-    res.redirect('/nhiem-vu');
-  });
 
   // API Routes
   app.get('/api/ping', (req, res) => {
@@ -1106,6 +1108,7 @@ async function startServer() {
   });
 
   // Vite middleware for development
+  // SPA Fallback - Ensure this is the LAST middleware
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1114,12 +1117,12 @@ async function startServer() {
     app.use(vite.middlewares);
     
     // Explicit fallback for development to ensure SPA routes work
-    app.get('*', async (req, res, next) => {
-      if (req.url.startsWith('/api')) return next();
+    app.use('*', async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api')) return next();
       try {
         const fs = await import('fs');
         const indexHtml = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
-        const transformedHtml = await vite.transformIndexHtml(req.url, indexHtml);
+        const transformedHtml = await vite.transformIndexHtml(req.originalUrl, indexHtml);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(transformedHtml);
       } catch (e) {
         vite.ssrFixStacktrace(e as Error);

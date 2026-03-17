@@ -51,10 +51,19 @@ export default function App() {
 
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      setUser(parsedUser);
-      setShowLogin(false);
-      fetchPendingTasks(parsedUser.id);
+      try {
+        const parsedUser = JSON.parse(savedUser);
+        if (parsedUser && typeof parsedUser === 'object' && parsedUser.id) {
+          setUser(parsedUser);
+          setShowLogin(false);
+          fetchPendingTasks(parsedUser.id);
+        } else {
+          localStorage.removeItem('user');
+        }
+      } catch (e) {
+        console.error('Failed to parse saved user:', e);
+        localStorage.removeItem('user');
+      }
     } else {
       const guest = localStorage.getItem('isGuest');
       if (guest) {
@@ -139,7 +148,7 @@ export default function App() {
   const currentRole: Role = user ? user.role : 'Nhân viên';
 
   const isLoggingInAsAdmin = loginCode.trim().toLowerCase() === 'admin' || 
-    employees?.find(e => e.code.trim().toLowerCase() === loginCode.trim().toLowerCase())?.role.toLowerCase() === 'admin';
+    employees?.find(e => e.code.trim().toLowerCase() === loginCode.trim().toLowerCase())?.role?.toLowerCase() === 'admin';
 
   if (showLogin) {
     return (
@@ -340,7 +349,7 @@ export default function App() {
                 <Route path="/announcements" element={<Navigate to="/thong-bao" replace />} />
                 <Route path="/thong-bao" element={<Announcements user={user} />} />
                 <Route path="/tasks" element={<Navigate to="/nhiem-vu" replace />} />
-                <Route path="/nhiem-vu" element={<Tasks />} />
+                <Route path="/nhiem-vu" element={<Tasks user={user} />} />
                 <Route path="/employees" element={<EmployeeList role={currentRole} />} />
                 <Route path="/guide" element={<Guide />} />
                 <Route path="/settings" element={<Settings role={currentRole} user={user} />} />

@@ -3,7 +3,7 @@ import {
   Plus, 
   Search, 
   Calendar as CalendarIcon, 
-  User, 
+  User as UserIcon, 
   Users, 
   CheckCircle2, 
   Circle, 
@@ -19,6 +19,14 @@ import {
 import { format, parseISO } from 'date-fns';
 import { socket } from '../socket';
 import clsx from 'clsx';
+
+interface User {
+  id: number;
+  code: string;
+  name: string;
+  department: string;
+  role: string;
+}
 
 interface Employee {
   id: number;
@@ -51,7 +59,7 @@ interface TaskMember {
   completed_at: string | null;
 }
 
-export default function Tasks() {
+export default function Tasks({ user }: { user: User | null }) {
   const [tasks, setTasks] = useState<AssignedTask[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -60,11 +68,6 @@ export default function Tasks() {
   const [taskFilter, setTaskFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const role = user?.role || 'Guest';
-  const departments = Array.isArray(employees) ? Array.from(new Set(employees.map(e => e.department))).filter(Boolean) : [];
-
   const [formData, setFormData] = useState({
     id: null as number | null,
     title: '',
@@ -72,6 +75,9 @@ export default function Tasks() {
     target_type: 'All' as 'All' | 'Department' | 'Individual',
     target_value: ''
   });
+
+  const role = user?.role || 'Guest';
+  const departments = Array.isArray(employees) ? Array.from(new Set(employees.map(e => e.department))).filter(Boolean) : [];
 
   const safeFormat = (dateStr: string | null | undefined, formatStr: string) => {
     if (!dateStr) return 'N/A';
