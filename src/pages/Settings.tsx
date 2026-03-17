@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Save, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
-import { Role } from '../App';
+import { Role } from '../types';
 import clsx from 'clsx';
 
 export default function Settings({ role, user }: { role: Role, user: any }) {

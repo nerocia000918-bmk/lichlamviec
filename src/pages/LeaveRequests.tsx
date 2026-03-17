@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { format, parseISO, startOfWeek, endOfWeek, addWeeks, isWithinInterval } from 'date-fns';
 import { vi } from 'date-fns/locale';
-import { User, socket } from '../App';
+import { socket } from '../socket';
+import { User } from '../types';
 import { Check, X, Clock, CalendarMinus, Info, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -32,18 +33,36 @@ export default function LeaveRequests({ user }: { user: User | null }) {
   const role = user ? user.role : 'Nhân viên';
   const isGuest = !user;
 
+  const safeFormat = (dateStr: string | null | undefined, formatStr: string) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const date = parseISO(dateStr);
+      if (isNaN(date.getTime())) return 'N/A';
+      return format(date, formatStr);
+    } catch (e) {
+      return 'N/A';
+    }
+  };
+
   const fetchData = async () => {
-    const [reqRes, shiftRes] = await Promise.all([
-      fetch('/api/leave-requests'),
-      fetch('/api/shifts')
-    ]);
-    setRequests(await reqRes.json());
-    
-    const allShifts: Shift[] = await shiftRes.json();
-    const offShifts = allShifts.filter(s => s.name.includes('OFF'));
-    setShifts(offShifts);
-    if (offShifts.length > 0 && formData.shift_id === 0) {
-      setFormData(prev => ({ ...prev, shift_id: offShifts[0].id }));
+    try {
+      const [reqRes, shiftRes] = await Promise.all([
+        fetch('/api/leave-requests'),
+        fetch('/api/shifts')
+      ]);
+      
+      const reqData = await reqRes.json();
+      const allShifts = await shiftRes.json();
+
+      setRequests(Array.isArray(reqData) ? reqData : []);
+      
+      const offShifts = (Array.isArray(allShifts) ? allShifts : []).filter((s: Shift) => s.name.includes('OFF'));
+      setShifts(offShifts);
+      if (offShifts.length > 0 && formData.shift_id === 0) {
+        setFormData(prev => ({ ...prev, shift_id: offShifts[0].id }));
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
     }
   };
 
@@ -202,14 +221,14 @@ export default function LeaveRequests({ user }: { user: User | null }) {
                 return (
                   <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                     <td className="p-4 text-sm text-slate-500">
-                      {format(parseISO(req.created_at), 'dd/MM/yyyy HH:mm')}
+                      {safeFormat(req.created_at, 'dd/MM/yyyy HH:mm')}
                     </td>
                     <td className="p-4">
                       <div className="font-medium text-slate-800">{req.employee_name}</div>
                       <div className="text-xs text-slate-500">{req.department}</div>
                     </td>
                     <td className="p-4 font-medium text-slate-800">
-                      {format(parseISO(req.date), 'dd/MM/yyyy')}
+                      {safeFormat(req.date, 'dd/MM/yyyy')}
                     </td>
                     <td className="p-4">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-100 text-amber-800">
