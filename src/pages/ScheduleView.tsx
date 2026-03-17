@@ -70,7 +70,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const [lockedMonths, setLockedMonths] = useState<string[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [activeAnnouncements, setActiveAnnouncements] = useState<Announcement[]>([]);
-  const [assignedTasks, setAssignedTasks] = useState<any[]>([]);
   const [currentAnnIndex, setCurrentAnnIndex] = useState(0);
   
   const [search, setSearch] = useState('');
@@ -107,14 +106,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const isMonthLocked = lockedMonths.includes(currentMonthStr);
 
   const fetchData = async () => {
-    const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes, assignedTaskRes] = await Promise.all([
+    const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes] = await Promise.all([
       fetch('/api/employees'),
       fetch('/api/shifts'),
       fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
       fetch('/api/locked-months'),
       fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${user.department}` : ''}`),
-      fetch('/api/tasks'),
-      fetch(`/api/assigned-tasks?employee_id=${user?.id}&department=${user?.department}&role=${user?.role || 'Nhân viên'}`)
+      fetch('/api/tasks')
     ]);
     
     const empData = await empRes.json();
@@ -123,7 +121,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
     const lockData = await lockRes.json();
     const annData = await annRes.json();
     const taskData = await taskRes.json();
-    const assignedTaskData = await assignedTaskRes.json();
 
     setEmployees(empData);
     setShifts(shiftData);
@@ -131,7 +128,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
     setLockedMonths(lockData);
     setAnnouncements(annData);
     setTasks(taskData);
-    setAssignedTasks(assignedTaskData);
 
     if (user) {
       const active = annData.filter((a: Announcement) => !a.viewed_at);
@@ -146,14 +142,12 @@ export default function ScheduleView({ user }: { user: User | null }) {
     socket.on('settings:updated', fetchData);
     socket.on('announcements:updated', fetchData);
     socket.on('tasks:updated', fetchData);
-    socket.on('assigned_tasks:updated', fetchData);
     return () => {
       socket.off('schedules:updated', fetchData);
       socket.off('shifts:updated', fetchData);
       socket.off('settings:updated', fetchData);
       socket.off('announcements:updated', fetchData);
       socket.off('tasks:updated', fetchData);
-      socket.off('assigned_tasks:updated', fetchData);
     };
   }, [currentDate]);
 
@@ -877,12 +871,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
                         
-                        const hasPendingTask = assignedTasks.some(t => 
-                          t.employee_id === emp.id && 
-                          t.due_date === dateStr && 
-                          !t.completed_at
-                        );
-                        
                         return (
                           <td 
                             key={dateStr} 
@@ -892,13 +880,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
                             )}
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                           >
-                            {hasPendingTask && (
-                              <div className="absolute top-1 right-1 z-10">
-                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm animate-bounce">
-                                  !
-                                </span>
-                              </div>
-                            )}
                             {sched ? (
                               <div 
                                 className="h-full min-h-[60px] rounded-xl p-2 flex flex-col justify-between border border-black/5 shadow-sm"
@@ -990,31 +971,18 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
 
-                        const hasPendingTask = assignedTasks.some(t => 
-                          t.employee_id === emp.id && 
-                          t.due_date === dateStr && 
-                          !t.completed_at
-                        );
-
                         return (
                           <div 
                             key={emp.id} 
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                             className={clsx(
-                              "p-3 flex items-center justify-between relative",
+                              "p-3 flex items-center justify-between",
                               editable ? "active:bg-slate-50 cursor-pointer" : ""
                             )}
                           >
-                            <div className="flex items-center gap-3">
-                              {hasPendingTask && (
-                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-bounce">
-                                  !
-                                </span>
-                              )}
-                              <div>
-                                <div className="font-medium text-slate-800 text-sm">{emp.name}</div>
-                                <div className="text-xs text-slate-500 mt-0.5">{emp.code}</div>
-                              </div>
+                            <div>
+                              <div className="font-medium text-slate-800 text-sm">{emp.name}</div>
+                              <div className="text-xs text-slate-500 mt-0.5">{emp.code}</div>
                             </div>
                             
                             {sched ? (
