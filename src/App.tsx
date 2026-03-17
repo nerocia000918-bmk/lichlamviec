@@ -229,7 +229,7 @@ export default function App() {
                 {currentRole === 'Nhân viên' && (
                    <Link to="/announcements" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
                     <Info className="w-5 h-5" />
-                    <span className="text-[10px] md:text-sm font-medium">Nhiệm Vụ</span>
+                    <span className="text-[10px] md:text-sm font-medium">Thông Báo & Nhiệm Vụ</span>
                   </Link>
                 )}
                 {currentRole === 'Admin' && (

@@ -627,7 +627,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
               <div className="flex items-center gap-3">
                 <Info className="w-6 h-6" />
                 <div>
-                  <h3 className="text-xl font-black uppercase tracking-wider">Thông báo quan trọng</h3>
+                  <h3 className="text-xl font-black uppercase tracking-wider">Thông Báo & Nhiệm Vụ quan trọng</h3>
                   <p className="text-xs opacity-80">Từ: {activeAnnouncements[currentAnnIndex].creator_name}</p>
                 </div>
               </div>
@@ -787,7 +787,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                 className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-100 px-3 py-2 rounded-xl hover:bg-amber-100 transition-colors text-xs font-bold"
               >
                 <Info className="w-3.5 h-3.5" />
-                Thông báo
+                Thông Báo & Nhiệm Vụ
               </button>
               <button 
                 onClick={() => setShowTaskForm(true)}
@@ -813,7 +813,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm">
           <h3 className="text-amber-800 font-bold mb-2 flex items-center gap-2">
             <Info className="w-5 h-5" />
-            Thông báo tuần này
+            Thông Báo & Nhiệm Vụ tuần này
           </h3>
           <div className="space-y-2">
             {announcements.map(ann => (

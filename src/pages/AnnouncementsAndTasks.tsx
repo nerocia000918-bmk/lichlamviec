@@ -259,7 +259,7 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
             )}
           >
             <Info className="w-5 h-5" />
-            Thông Báo
+            Thông Báo & Nhiệm Vụ
           </button>
         )}
       </div>
@@ -267,10 +267,10 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">
-            {activeTab === 'tasks' ? 'Quản lý nhiệm vụ' : 'Quản lý thông báo'}
+            {activeTab === 'tasks' ? 'Nhiệm Vụ' : 'Thông Báo & Nhiệm Vụ'}
           </h2>
           <p className="text-slate-500">
-            {activeTab === 'tasks' ? 'Giao và theo dõi tiến độ nhiệm vụ' : 'Tạo và theo dõi thông báo nổi bật'}
+            {activeTab === 'tasks' ? 'Giao và theo dõi tiến độ nhiệm vụ' : 'Tạo và theo dõi thông báo & nhiệm vụ'}
           </p>
         </div>
         {(role === 'Admin' || role === 'Tổ trưởng') && (
