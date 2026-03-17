@@ -205,6 +205,15 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
     await fetch(`/api/assigned-tasks/${id}`, { method: 'DELETE' });
   };
 
+  const handleTaskReceive = async (taskId: number) => {
+    if (!user) return;
+    await fetch(`/api/assigned-tasks/${taskId}/receive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_id: user.id })
+    });
+  };
+
   const handleTaskComplete = async (taskId: number, completed: boolean) => {
     if (!user) return;
     await fetch(`/api/assigned-tasks/${taskId}/complete`, {
@@ -286,7 +295,9 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
 
       {activeTab === 'tasks' ? (
         <div className="grid grid-cols-1 gap-4">
-          {Array.isArray(tasks) && tasks.map(task => {
+          {Array.isArray(tasks) && Array.from(new Set(tasks.map(t => t.id))).map(taskId => {
+            const task = tasks.find(t => t.id === taskId);
+            if (!task) return null;
             const isCreator = task.created_by === user?.id;
             const isAssigned = role === 'Nhân viên';
             
@@ -332,27 +343,41 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
 
                   <div className="flex md:flex-col justify-end gap-2">
                     {isAssigned ? (
-                      <button 
-                        onClick={() => handleTaskComplete(task.id, task.status !== 'Completed')}
-                        className={clsx(
-                          "flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-lg",
-                          task.status === 'Completed' 
-                            ? "bg-green-100 text-green-700 hover:bg-green-200" 
-                            : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100"
-                        )}
-                      >
-                        {task.status === 'Completed' ? (
-                          <>
-                            <CheckCircle2 className="w-5 h-5" />
-                            Đã hoàn thành
-                          </>
-                        ) : (
-                          <>
+                      <div className="flex flex-col gap-2">
+                        {task.status === 'Pending' && (
+                          <button 
+                            onClick={() => handleTaskReceive(task.id)}
+                            className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-lg bg-amber-500 text-white hover:bg-amber-600 shadow-amber-100"
+                          >
                             <CheckSquare className="w-5 h-5" />
-                            Xác nhận hoàn thành
-                          </>
+                            Xác nhận đã nhận
+                          </button>
                         )}
-                      </button>
+                        
+                        {(task.status === 'Received' || task.status === 'Completed') && (
+                          <button 
+                            onClick={() => handleTaskComplete(task.id, task.status !== 'Completed')}
+                            className={clsx(
+                              "flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-lg",
+                              task.status === 'Completed' 
+                                ? "bg-green-100 text-green-700 hover:bg-green-200" 
+                                : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100"
+                            )}
+                          >
+                            {task.status === 'Completed' ? (
+                              <>
+                                <CheckCircle2 className="w-5 h-5" />
+                                Đã hoàn thành
+                              </>
+                            ) : (
+                              <>
+                                <CheckSquare className="w-5 h-5" />
+                                Xác nhận hoàn thành
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <>
                         <button 

@@ -55,6 +55,19 @@ export default function App() {
         setShowLogin(false);
       }
     }
+
+    const handleTaskUpdate = () => {
+      const currentUser = localStorage.getItem('user');
+      if (currentUser) {
+        const parsed = JSON.parse(currentUser);
+        fetchPendingTasks(parsed.id);
+      }
+    };
+
+    socket.on('assigned_tasks:updated', handleTaskUpdate);
+    return () => {
+      socket.off('assigned_tasks:updated', handleTaskUpdate);
+    };
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {

@@ -436,12 +436,18 @@ db.exec(`
     employee_id INTEGER,
     status TEXT DEFAULT 'Pending', -- 'Pending', 'Completed'
     viewed_at TEXT,
+    received_at TEXT,
     completed_at TEXT,
     PRIMARY KEY(task_id, employee_id),
     FOREIGN KEY(task_id) REFERENCES assigned_tasks(id),
     FOREIGN KEY(employee_id) REFERENCES employees(id)
   );
 `);
+
+// Add received_at column if not exists
+try {
+  db.exec('ALTER TABLE task_assignments ADD COLUMN received_at TEXT');
+} catch (e) {}
 
 // Add password column to employees if not exists
 try {
@@ -992,14 +998,15 @@ async function startServer() {
     let tasks;
     if (role === 'Admin') {
       tasks = db.prepare(`
-        SELECT t.*, e.name as creator_name
+        SELECT t.*, e.name as creator_name, ta.employee_id, ta.status, ta.completed_at, ta.viewed_at, ta.received_at
         FROM assigned_tasks t
         JOIN employees e ON t.created_by = e.id
+        LEFT JOIN task_assignments ta ON t.id = ta.task_id
         ORDER BY t.created_at DESC
       `).all();
     } else if (role === 'Tổ trưởng') {
       tasks = db.prepare(`
-        SELECT DISTINCT t.*, e.name as creator_name
+        SELECT DISTINCT t.*, e.name as creator_name, ta.employee_id, ta.status, ta.completed_at, ta.viewed_at, ta.received_at
         FROM assigned_tasks t
         JOIN employees e ON t.created_by = e.id
         LEFT JOIN task_assignments ta ON t.id = ta.task_id
@@ -1010,7 +1017,7 @@ async function startServer() {
       `).all(employee_id, department, employee_id);
     } else {
       tasks = db.prepare(`
-        SELECT t.*, e.name as creator_name, ta.status, ta.viewed_at, ta.completed_at
+        SELECT t.*, e.name as creator_name, ta.status, ta.viewed_at, ta.completed_at, ta.received_at
         FROM assigned_tasks t
         JOIN employees e ON t.created_by = e.id
         JOIN task_assignments ta ON t.id = ta.task_id
@@ -1032,9 +1039,20 @@ async function startServer() {
     
     const taskId = result.lastInsertRowid;
     
-    if (employee_ids && Array.isArray(employee_ids)) {
+    let targetEmployeeIds: number[] = [];
+    if (target_type === 'All') {
+      const allEmps = db.prepare('SELECT id FROM employees').all() as { id: number }[];
+      targetEmployeeIds = allEmps.map(e => e.id);
+    } else if (target_type === 'Department') {
+      const deptEmps = db.prepare('SELECT id FROM employees WHERE department = ?').all(target_value) as { id: number }[];
+      targetEmployeeIds = deptEmps.map(e => e.id);
+    } else if (employee_ids && Array.isArray(employee_ids)) {
+      targetEmployeeIds = employee_ids;
+    }
+    
+    if (targetEmployeeIds.length > 0) {
       const insertAssign = db.prepare('INSERT INTO task_assignments (task_id, employee_id) VALUES (?, ?)');
-      employee_ids.forEach((empId: number) => {
+      targetEmployeeIds.forEach((empId: number) => {
         insertAssign.run(taskId, empId);
       });
     }
@@ -1096,6 +1114,16 @@ async function startServer() {
     db.prepare('UPDATE task_assignments SET viewed_at = ? WHERE task_id = ? AND employee_id = ? AND viewed_at IS NULL')
       .run(viewed_at, req.params.id, employee_id);
     io.emit('assigned_tasks:updated');
+    triggerSync();
+    res.json({ success: true });
+  });
+
+  app.post('/api/assigned-tasks/:id/receive', (req, res) => {
+    const { employee_id } = req.body;
+    db.prepare("UPDATE task_assignments SET received_at = ?, status = 'Received' WHERE task_id = ? AND employee_id = ?")
+      .run(new Date().toISOString(), req.params.id, employee_id);
+    io.emit('assigned_tasks:updated');
+    triggerSync();
     res.json({ success: true });
   });
 
@@ -1128,7 +1156,7 @@ async function startServer() {
       SELECT COUNT(*) as count, GROUP_CONCAT(t.title, '|') as titles
       FROM task_assignments ta
       JOIN assigned_tasks t ON ta.task_id = t.id
-      WHERE ta.employee_id = ? AND ta.status = 'Pending'
+      WHERE ta.employee_id = ? AND ta.status IN ('Pending', 'Received')
     `).get(employee_id) as { count: number, titles: string | null };
     
     res.json({

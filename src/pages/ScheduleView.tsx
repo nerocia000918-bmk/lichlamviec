@@ -885,11 +885,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
                         
-                        const hasPendingTask = assignedTasks.some(t => 
-                          t.employee_id === emp.id && 
-                          t.due_date === dateStr && 
-                          !t.completed_at
-                        );
+                        const hasPendingTask = assignedTasks.some(t => {
+                          if (!t.due_date) return false;
+                          const taskDate = t.due_date.split('T')[0];
+                          return t.employee_id === emp.id && 
+                                 taskDate === dateStr && 
+                                 !t.completed_at;
+                        });
                         
                         return (
                           <td 
@@ -998,11 +1000,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
 
-                        const hasPendingTask = assignedTasks.some(t => 
-                          t.employee_id === emp.id && 
-                          t.due_date === dateStr && 
-                          !t.completed_at
-                        );
+                        const hasPendingTask = assignedTasks.some(t => {
+                          if (!t.due_date) return false;
+                          const taskDate = t.due_date.split('T')[0];
+                          return t.employee_id === emp.id && 
+                                 taskDate === dateStr && 
+                                 !t.completed_at;
+                        });
 
                         return (
                           <div 
