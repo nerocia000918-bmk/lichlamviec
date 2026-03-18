@@ -35,8 +35,14 @@ export default function App() {
   const [error, setError] = useState('');
   const [employees, setEmployees] = useState<any[]>([]);
   const [pendingTasks, setPendingTasks] = useState<{ count: number, titles: string[] } | null>(null);
+  const [hasDismissedTasks, setHasDismissedTasks] = useState(false);
 
   useEffect(() => {
+    // Request notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+
     fetch('/api/employees')
       .then(res => res.json())
       .then(data => setEmployees(data))
@@ -60,7 +66,7 @@ export default function App() {
       const currentUser = localStorage.getItem('user');
       if (currentUser) {
         const parsed = JSON.parse(currentUser);
-        fetchPendingTasks(parsed.id);
+        fetchPendingTasks(parsed.id, true); // true means it's a new update, so show modal even if dismissed
       }
     };
 
@@ -130,16 +136,30 @@ export default function App() {
     setPassword('');
     setError('');
     setPendingTasks(null);
+    setHasDismissedTasks(false);
     localStorage.removeItem('user');
     localStorage.removeItem('isGuest');
   };
 
-  const fetchPendingTasks = async (userId: number) => {
+  const fetchPendingTasks = async (userId: number, isNewUpdate = false) => {
     try {
       const res = await fetch(`/api/assigned-tasks/pending-count?employee_id=${userId}`);
       const data = await res.json();
       if (data.count > 0) {
         setPendingTasks(data);
+        if (isNewUpdate) {
+          setHasDismissedTasks(false); // Reset dismissal on new task
+          
+          // Browser Notification
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Nhiệm vụ mới!', {
+              body: `Bạn có ${data.count} nhiệm vụ chưa hoàn thành.`,
+              icon: '/favicon.ico'
+            });
+          }
+        }
+      } else {
+        setPendingTasks(null);
       }
     } catch (err) {
       console.error('Error fetching pending tasks:', err);
@@ -308,7 +328,7 @@ export default function App() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-4 md:p-8 pb-24 md:pb-8">
-          {pendingTasks && (
+          {pendingTasks && !hasDismissedTasks && (
             <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
               <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in duration-300 border-t-8 border-indigo-600">
                 <div className="p-6">
@@ -331,7 +351,7 @@ export default function App() {
                   </div>
                   
                   <button 
-                    onClick={() => setPendingTasks(null)}
+                    onClick={() => setHasDismissedTasks(true)}
                     className="w-full py-3 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100"
                   >
                     Đã hiểu

@@ -296,10 +296,13 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
       {activeTab === 'tasks' ? (
         <div className="grid grid-cols-1 gap-4">
           {Array.isArray(tasks) && Array.from(new Set(tasks.map(t => t.id))).map(taskId => {
-            const task = tasks.find(t => t.id === taskId);
+            // Find the version of the task assigned to the current user, or just the first one
+            const userTask = tasks.find(t => t.id === taskId && t.employee_id === user?.id);
+            const task = userTask || tasks.find(t => t.id === taskId);
+            
             if (!task) return null;
             const isCreator = task.created_by === user?.id;
-            const isAssigned = role === 'Nhân viên';
+            const isAssigned = tasks.some(t => t.id === taskId && t.employee_id === user?.id);
             
             return (
               <div key={task.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
