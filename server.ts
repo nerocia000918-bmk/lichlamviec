@@ -211,7 +211,7 @@ async function loadFromGoogleSheets() {
         }
 
         if (sheetEmpCount > 0) {
-          const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
           let hasAdmin = false;
           data.employees.forEach((e: any) => {
             let role = e.role || 'Nhân viên';
@@ -226,7 +226,9 @@ async function loadFromGoogleSheets() {
             let password = e.password !== undefined && e.password !== null ? String(e.password) : '';
             if (role === 'Admin' && !password) password = '1234';
             
-            insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password);
+            const resignedDate = e.resigned_date ? normalizeDate(e.resigned_date) : null;
+            
+            insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password, resignedDate);
           });
           
           if (!hasAdmin) {
@@ -344,7 +346,8 @@ db.exec(`
     name TEXT,
     department TEXT,
     role TEXT,
-    phone TEXT
+    phone TEXT,
+    resigned_date TEXT
   );
 
   CREATE TABLE IF NOT EXISTS shifts (
@@ -454,6 +457,11 @@ try {
   db.exec('ALTER TABLE employees ADD COLUMN password TEXT');
 } catch (e) {}
 
+// Add resigned_date column to employees if not exists
+try {
+  db.exec('ALTER TABLE employees ADD COLUMN resigned_date TEXT');
+} catch (e) {}
+
 // Add start_time and end_time to announcements if not exists
 try {
   db.exec('ALTER TABLE announcements ADD COLUMN start_time TEXT');
@@ -557,10 +565,10 @@ async function startServer() {
   });
 
   app.post('/api/employees', (req, res) => {
-    const { code, name, department, role, phone } = req.body;
+    const { code, name, department, role, phone, resigned_date } = req.body;
     try {
-      const result = db.prepare('INSERT INTO employees (code, name, department, role, phone) VALUES (?, ?, ?, ?, ?)')
-        .run(code, name, department, role, phone);
+      const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(code, name, department, role, phone, resigned_date || null);
       const newEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(result.lastInsertRowid);
       io.emit('employees:updated');
       triggerSync();
@@ -571,10 +579,10 @@ async function startServer() {
   });
 
   app.put('/api/employees/:id', (req, res) => {
-    const { code, name, department, role, phone } = req.body;
+    const { code, name, department, role, phone, resigned_date } = req.body;
     try {
-      db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ? WHERE id = ?')
-        .run(code, name, department, role, phone, req.params.id);
+      db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ? WHERE id = ?')
+        .run(code, name, department, role, phone, resigned_date || null, req.params.id);
       io.emit('employees:updated');
       io.emit('schedules:updated');
       triggerSync();

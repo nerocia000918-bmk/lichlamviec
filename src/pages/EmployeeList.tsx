@@ -10,6 +10,7 @@ interface Employee {
   department: string;
   role: string;
   phone: string;
+  resigned_date?: string | null;
 }
 
 const DEPARTMENTS = ['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho'];
@@ -20,7 +21,7 @@ export default function EmployeeList({ role }: { role: Role }) {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formData, setFormData] = useState({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '' });
+  const [formData, setFormData] = useState({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
 
   const fetchEmployees = async () => {
@@ -45,13 +46,20 @@ export default function EmployeeList({ role }: { role: Role }) {
 
   const openAddForm = () => {
     setEditingId(null);
-    setFormData({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '' });
+    setFormData({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '' });
     setShowForm(true);
   };
 
   const openEditForm = (emp: Employee) => {
     setEditingId(emp.id);
-    setFormData({ code: emp.code, name: emp.name, department: emp.department, role: emp.role, phone: emp.phone });
+    setFormData({ 
+      code: emp.code, 
+      name: emp.name, 
+      department: emp.department, 
+      role: emp.role, 
+      phone: emp.phone,
+      resigned_date: emp.resigned_date || ''
+    });
     setShowForm(true);
   };
 
@@ -148,6 +156,7 @@ export default function EmployeeList({ role }: { role: Role }) {
                 <th className="p-4 font-medium border-b border-slate-200">Bộ phận</th>
                 <th className="p-4 font-medium border-b border-slate-200">Chức vụ</th>
                 <th className="p-4 font-medium border-b border-slate-200">SĐT</th>
+                <th className="p-4 font-medium border-b border-slate-200">Ngày nghỉ việc</th>
                 {role === 'Admin' && <th className="p-4 font-medium border-b border-slate-200 text-right">Thao tác</th>}
               </tr>
             </thead>
@@ -163,6 +172,15 @@ export default function EmployeeList({ role }: { role: Role }) {
                   </td>
                   <td className="p-4 text-slate-600">{emp.role}</td>
                   <td className="p-4 text-slate-600">{emp.phone}</td>
+                  <td className="p-4 text-slate-600">
+                    {emp.resigned_date ? (
+                      <span className="text-red-600 font-medium">
+                        {new Date(emp.resigned_date).toLocaleDateString('vi-VN')}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 italic">Đang làm việc</span>
+                    )}
+                  </td>
                   {role === 'Admin' && (
                     <td className="p-4 text-right">
                       <div className="flex justify-end gap-2">
@@ -213,6 +231,11 @@ export default function EmployeeList({ role }: { role: Role }) {
               <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">{emp.department}</span>
               <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.role}</span>
               {emp.phone && <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.phone}</span>}
+              {emp.resigned_date && (
+                <span className="bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">
+                  Nghỉ việc: {new Date(emp.resigned_date).toLocaleDateString('vi-VN')}
+                </span>
+              )}
             </div>
           </div>
         ))}
@@ -256,6 +279,11 @@ export default function EmployeeList({ role }: { role: Role }) {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Số điện thoại</label>
                 <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày nghỉ việc (nếu có)</label>
+                <input type="date" value={formData.resigned_date} onChange={e => setFormData({...formData, resigned_date: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <p className="text-xs text-slate-500 mt-1 italic">Sau ngày này, nhân viên sẽ không thể đăng nhập và không xuất hiện trong lịch tuần mới.</p>
               </div>
               
               <div className="pt-4 flex justify-end gap-3">

@@ -24,6 +24,7 @@ export interface User {
   name: string;
   department: string;
   role: Role;
+  resigned_date?: string | null;
 }
 
 export default function App() {
@@ -100,6 +101,16 @@ export default function App() {
       const foundUser = allEmployees.find(emp => emp.code.trim().toLowerCase() === trimmedCode.toLowerCase());
       
       if (foundUser) {
+        if (foundUser.resigned_date) {
+          const resignedDate = new Date(foundUser.resigned_date);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (today > resignedDate) {
+            setError('Tài khoản này đã ngừng hoạt động (nhân viên đã nghỉ việc).');
+            return;
+          }
+        }
+
         const isAdmin = foundUser.role.toLowerCase() === 'admin';
         if (isAdmin) {
           if (!password) {

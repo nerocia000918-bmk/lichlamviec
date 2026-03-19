@@ -13,6 +13,7 @@ interface Employee {
   name: string;
   department: string;
   role: string;
+  resigned_date?: string | null;
 }
 
 interface Shift {
@@ -171,6 +172,18 @@ export default function ScheduleView({ user }: { user: User | null }) {
 
     return employees
       .filter(e => {
+        // Filter out resigned employees if they resigned before the start of the current week
+        if (e.resigned_date) {
+          const resignedDate = new Date(e.resigned_date);
+          resignedDate.setHours(0, 0, 0, 0);
+          const weekStartLocal = new Date(weekStart);
+          weekStartLocal.setHours(0, 0, 0, 0);
+          
+          if (resignedDate < weekStartLocal) {
+            return false;
+          }
+        }
+
         const matchName = e.name.toLowerCase().includes(search.toLowerCase()) || e.code.toLowerCase().includes(search.toLowerCase());
         
         let matchView = true;
@@ -271,7 +284,16 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const autoScheduleSales = async () => {
     if (isMonthLocked) return alert('Tháng này đã khóa lịch!');
     
-    const salesEmps = employees.filter(e => e.department === 'Bán hàng');
+    const salesEmps = employees.filter(e => {
+      if (e.resigned_date) {
+        const resignedDate = new Date(e.resigned_date);
+        resignedDate.setHours(0, 0, 0, 0);
+        const weekStartLocal = new Date(weekStart);
+        weekStartLocal.setHours(0, 0, 0, 0);
+        if (resignedDate < weekStartLocal) return false;
+      }
+      return e.department === 'Bán hàng';
+    });
     if (salesEmps.length < 5) {
       alert('Cần ít nhất 5 nhân viên Bán hàng để xếp lịch tự động!');
       return;
