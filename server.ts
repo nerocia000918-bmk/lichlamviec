@@ -211,7 +211,7 @@ async function loadFromGoogleSheets() {
         }
 
         if (sheetEmpCount > 0) {
-          const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+          const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date, joined_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
           let hasAdmin = false;
           data.employees.forEach((e: any) => {
             let role = e.role || 'Nhân viên';
@@ -227,8 +227,9 @@ async function loadFromGoogleSheets() {
             if (role === 'Admin' && !password) password = '1234';
             
             const resignedDate = e.resigned_date ? normalizeDate(e.resigned_date) : null;
+            const joinedDate = e.joined_date ? normalizeDate(e.joined_date) : null;
             
-            insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password, resignedDate);
+            insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate);
           });
           
           if (!hasAdmin) {
@@ -347,7 +348,8 @@ db.exec(`
     department TEXT,
     role TEXT,
     phone TEXT,
-    resigned_date TEXT
+    resigned_date TEXT,
+    joined_date TEXT
   );
 
   CREATE TABLE IF NOT EXISTS shifts (
@@ -462,6 +464,11 @@ try {
   db.exec('ALTER TABLE employees ADD COLUMN resigned_date TEXT');
 } catch (e) {}
 
+// Add joined_date column to employees if not exists
+try {
+  db.exec('ALTER TABLE employees ADD COLUMN joined_date TEXT');
+} catch (e) {}
+
 // Add start_time and end_time to announcements if not exists
 try {
   db.exec('ALTER TABLE announcements ADD COLUMN start_time TEXT');
@@ -565,10 +572,10 @@ async function startServer() {
   });
 
   app.post('/api/employees', (req, res) => {
-    const { code, name, department, role, phone, resigned_date } = req.body;
+    const { code, name, department, role, phone, resigned_date, joined_date } = req.body;
     try {
-      const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(code, name, department, role, phone, resigned_date || null);
+      const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date, joined_date) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(code, name, department, role, phone, resigned_date || null, joined_date || null);
       const newEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(result.lastInsertRowid);
       io.emit('employees:updated');
       triggerSync();
@@ -579,10 +586,10 @@ async function startServer() {
   });
 
   app.put('/api/employees/:id', (req, res) => {
-    const { code, name, department, role, phone, resigned_date } = req.body;
+    const { code, name, department, role, phone, resigned_date, joined_date } = req.body;
     try {
-      db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ? WHERE id = ?')
-        .run(code, name, department, role, phone, resigned_date || null, req.params.id);
+      db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ?, joined_date = ? WHERE id = ?')
+        .run(code, name, department, role, phone, resigned_date || null, joined_date || null, req.params.id);
       io.emit('employees:updated');
       io.emit('schedules:updated');
       triggerSync();
@@ -708,6 +715,13 @@ async function startServer() {
         const newDate = new Date(oldDate.getTime() + diffDays * 24 * 60 * 60 * 1000);
         const newDateStr = newDate.toISOString().split('T')[0];
         
+        // Check if employee is still active at newDateStr
+        const emp = db.prepare('SELECT joined_date, resigned_date FROM employees WHERE id = ?').get(s.employee_id) as any;
+        if (emp) {
+          if (emp.joined_date && newDateStr < emp.joined_date) continue;
+          if (emp.resigned_date && newDateStr > emp.resigned_date) continue;
+        }
+
         const existing = checkStmt.get(newDateStr, s.employee_id) as any;
         if (existing) {
           updateStmt.run(s.shift_id, s.task, s.status, s.note || '', existing.id);

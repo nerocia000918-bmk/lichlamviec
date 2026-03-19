@@ -25,6 +25,7 @@ export interface User {
   department: string;
   role: Role;
   resigned_date?: string | null;
+  joined_date?: string | null;
 }
 
 export default function App() {
@@ -101,6 +102,16 @@ export default function App() {
       const foundUser = allEmployees.find(emp => emp.code.trim().toLowerCase() === trimmedCode.toLowerCase());
       
       if (foundUser) {
+        if (foundUser.joined_date) {
+          const joinedDate = new Date(foundUser.joined_date);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (today < joinedDate) {
+            setError('Tài khoản này chưa đến ngày bắt đầu làm việc.');
+            return;
+          }
+        }
+
         if (foundUser.resigned_date) {
           const resignedDate = new Date(foundUser.resigned_date);
           const today = new Date();

@@ -14,6 +14,7 @@ interface Employee {
   department: string;
   role: string;
   resigned_date?: string | null;
+  joined_date?: string | null;
 }
 
 interface Shift {
@@ -184,6 +185,18 @@ export default function ScheduleView({ user }: { user: User | null }) {
           }
         }
 
+        // Filter out employees who haven't joined yet
+        if (e.joined_date) {
+          const joinedDate = new Date(e.joined_date);
+          joinedDate.setHours(0, 0, 0, 0);
+          const weekEndLocal = new Date(weekDays[6]);
+          weekEndLocal.setHours(23, 59, 59, 999);
+          
+          if (joinedDate > weekEndLocal) {
+            return false;
+          }
+        }
+
         const matchName = e.name.toLowerCase().includes(search.toLowerCase()) || e.code.toLowerCase().includes(search.toLowerCase());
         
         let matchView = true;
@@ -291,6 +304,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
         const weekStartLocal = new Date(weekStart);
         weekStartLocal.setHours(0, 0, 0, 0);
         if (resignedDate < weekStartLocal) return false;
+      }
+      if (e.joined_date) {
+        const joinedDate = new Date(e.joined_date);
+        joinedDate.setHours(0, 0, 0, 0);
+        const weekEndLocal = new Date(weekDays[6]);
+        weekEndLocal.setHours(23, 59, 59, 999);
+        if (joinedDate > weekEndLocal) return false;
       }
       return e.department === 'Bán hàng';
     });

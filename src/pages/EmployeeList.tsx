@@ -11,6 +11,7 @@ interface Employee {
   role: string;
   phone: string;
   resigned_date?: string | null;
+  joined_date?: string | null;
 }
 
 const DEPARTMENTS = ['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho'];
@@ -21,7 +22,7 @@ export default function EmployeeList({ role }: { role: Role }) {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formData, setFormData] = useState({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '' });
+  const [formData, setFormData] = useState({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '', joined_date: '' });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
 
   const fetchEmployees = async () => {
@@ -46,7 +47,7 @@ export default function EmployeeList({ role }: { role: Role }) {
 
   const openAddForm = () => {
     setEditingId(null);
-    setFormData({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '' });
+    setFormData({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '', joined_date: '' });
     setShowForm(true);
   };
 
@@ -58,7 +59,8 @@ export default function EmployeeList({ role }: { role: Role }) {
       department: emp.department, 
       role: emp.role, 
       phone: emp.phone,
-      resigned_date: emp.resigned_date || ''
+      resigned_date: emp.resigned_date || '',
+      joined_date: emp.joined_date || ''
     });
     setShowForm(true);
   };
@@ -156,6 +158,7 @@ export default function EmployeeList({ role }: { role: Role }) {
                 <th className="p-4 font-medium border-b border-slate-200">Bộ phận</th>
                 <th className="p-4 font-medium border-b border-slate-200">Chức vụ</th>
                 <th className="p-4 font-medium border-b border-slate-200">SĐT</th>
+                <th className="p-4 font-medium border-b border-slate-200">Ngày bắt đầu</th>
                 <th className="p-4 font-medium border-b border-slate-200">Ngày nghỉ việc</th>
                 {role === 'Admin' && <th className="p-4 font-medium border-b border-slate-200 text-right">Thao tác</th>}
               </tr>
@@ -172,6 +175,15 @@ export default function EmployeeList({ role }: { role: Role }) {
                   </td>
                   <td className="p-4 text-slate-600">{emp.role}</td>
                   <td className="p-4 text-slate-600">{emp.phone}</td>
+                  <td className="p-4 text-slate-600">
+                    {emp.joined_date ? (
+                      <span className="text-indigo-600 font-medium">
+                        {new Date(emp.joined_date).toLocaleDateString('vi-VN')}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 italic">Chưa cập nhật</span>
+                    )}
+                  </td>
                   <td className="p-4 text-slate-600">
                     {emp.resigned_date ? (
                       <span className="text-red-600 font-medium">
@@ -227,16 +239,21 @@ export default function EmployeeList({ role }: { role: Role }) {
                 </div>
               )}
             </div>
-            <div className="flex flex-wrap gap-2 text-sm">
-              <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">{emp.department}</span>
-              <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.role}</span>
-              {emp.phone && <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.phone}</span>}
-              {emp.resigned_date && (
-                <span className="bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">
-                  Nghỉ việc: {new Date(emp.resigned_date).toLocaleDateString('vi-VN')}
-                </span>
-              )}
-            </div>
+              <div className="flex flex-wrap gap-2 text-sm">
+                <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">{emp.department}</span>
+                <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.role}</span>
+                {emp.phone && <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.phone}</span>}
+                {emp.joined_date && (
+                  <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">
+                    Bắt đầu: {new Date(emp.joined_date).toLocaleDateString('vi-VN')}
+                  </span>
+                )}
+                {emp.resigned_date && (
+                  <span className="bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">
+                    Nghỉ việc: {new Date(emp.resigned_date).toLocaleDateString('vi-VN')}
+                  </span>
+                )}
+              </div>
           </div>
         ))}
         {filtered.length === 0 && (
@@ -279,6 +296,11 @@ export default function EmployeeList({ role }: { role: Role }) {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Số điện thoại</label>
                 <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày bắt đầu làm việc</label>
+                <input type="date" value={formData.joined_date} onChange={e => setFormData({...formData, joined_date: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
+                <p className="text-xs text-slate-500 mt-1 italic">Nhân viên sẽ chỉ xuất hiện trong lịch từ tuần có ngày này trở đi.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Ngày nghỉ việc (nếu có)</label>
