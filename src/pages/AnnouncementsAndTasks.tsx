@@ -30,6 +30,7 @@ interface AssignedTask {
   status?: string;
   viewed_at?: string;
   completed_at?: string;
+  employee_id?: number;
 }
 
 interface ViewStatus {

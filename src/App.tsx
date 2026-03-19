@@ -36,10 +36,14 @@ export default function App() {
   const [employees, setEmployees] = useState<any[]>([]);
   const [pendingTasks, setPendingTasks] = useState<{ count: number, titles: string[] } | null>(null);
   const [hasDismissedTasks, setHasDismissedTasks] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    const saved = localStorage.getItem('notifications_enabled');
+    return saved === null ? true : saved === 'true';
+  });
 
   useEffect(() => {
-    // Request notification permission
-    if ('Notification' in window && Notification.permission === 'default') {
+    // Request notification permission if enabled
+    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
 
@@ -66,7 +70,7 @@ export default function App() {
       const currentUser = localStorage.getItem('user');
       if (currentUser) {
         const parsed = JSON.parse(currentUser);
-        fetchPendingTasks(parsed.id, true); // true means it's a new update, so show modal even if dismissed
+        fetchPendingTasks(parsed.id, true);
       }
     };
 
@@ -74,7 +78,7 @@ export default function App() {
     return () => {
       socket.off('assigned_tasks:updated', handleTaskUpdate);
     };
-  }, []);
+  }, [notificationsEnabled]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,26 +145,33 @@ export default function App() {
     localStorage.removeItem('isGuest');
   };
 
-  const fetchPendingTasks = async (userId: number, isNewUpdate = false) => {
+  const fetchPendingTasks = async (userId: number, isFromSocket = false) => {
     try {
       const res = await fetch(`/api/assigned-tasks/pending-count?employee_id=${userId}`);
       const data = await res.json();
-      if (data.count > 0) {
-        setPendingTasks(data);
-        if (isNewUpdate) {
-          setHasDismissedTasks(false); // Reset dismissal on new task
-          
-          // Browser Notification
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Nhiệm vụ mới!', {
-              body: `Bạn có ${data.count} nhiệm vụ chưa hoàn thành.`,
-              icon: '/favicon.ico'
-            });
+      
+      setPendingTasks(prev => {
+        // Only trigger "new" notification state if the count increased or titles changed
+        const isActuallyNew = !prev || 
+          data.count > prev.count || 
+          JSON.stringify(data.titles) !== JSON.stringify(prev.titles);
+
+        if (data.count > 0) {
+          if (isActuallyNew && isFromSocket) {
+            setHasDismissedTasks(false); // Only reset dismissal if it's actually a new/different task set
+            
+            // Browser Notification
+            if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+              new Notification('Nhiệm vụ mới!', {
+                body: `Bạn có ${data.count} nhiệm vụ chưa hoàn thành.`,
+                icon: '/favicon.ico'
+              });
+            }
           }
+          return data;
         }
-      } else {
-        setPendingTasks(null);
-      }
+        return null;
+      });
     } catch (err) {
       console.error('Error fetching pending tasks:', err);
     }
@@ -271,12 +282,12 @@ export default function App() {
                       <Users className="w-5 h-5" />
                       <span className="text-[10px] md:text-sm font-medium">Nhân sự / Staff</span>
                     </Link>
-                    <Link to="/settings" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
-                      <SettingsIcon className="w-5 h-5" />
-                      <span className="text-[10px] md:text-sm font-medium">Cài đặt / Settings</span>
-                    </Link>
                   </>
                 )}
+                <Link to="/settings" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
+                  <SettingsIcon className="w-5 h-5" />
+                  <span className="text-[10px] md:text-sm font-medium">Cài đặt / Settings</span>
+                </Link>
                 <Link to="/guide" className="flex-1 md:flex-none flex flex-col md:flex-row items-center gap-1 md:gap-3 p-2 md:p-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-indigo-600 transition-colors">
                   <BookOpen className="w-5 h-5" />
                   <span className="text-[10px] md:text-sm font-medium">HDSD / Guide</span>
@@ -368,7 +379,17 @@ export default function App() {
                 <Route path="/announcements" element={<AnnouncementsAndTasks user={user} />} />
                 <Route path="/employees" element={<EmployeeList role={currentRole} />} />
                 <Route path="/guide" element={<Guide />} />
-                <Route path="/settings" element={<Settings role={currentRole} user={user} />} />
+                <Route path="/settings" element={
+                  <Settings 
+                    role={currentRole} 
+                    user={user} 
+                    notificationsEnabled={notificationsEnabled}
+                    setNotificationsEnabled={(val) => {
+                      setNotificationsEnabled(val);
+                      localStorage.setItem('notifications_enabled', String(val));
+                    }}
+                  />
+                } />
               </>
             )}
             <Route path="*" element={<Navigate to="/" replace />} />
