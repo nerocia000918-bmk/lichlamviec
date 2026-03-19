@@ -885,13 +885,20 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
                         
-                        const hasPendingTask = assignedTasks.some(t => {
+                        const hasPendingTaskOnDate = assignedTasks.some(t => {
                           if (!t.due_date) return false;
                           const taskDate = t.due_date.split('T')[0];
                           return t.employee_id === emp.id && 
                                  taskDate === dateStr && 
                                  !t.completed_at;
                         });
+
+                        const isToday = dateStr === format(new Date(), 'yyyy-MM-dd');
+                        const hasAnyPendingTask = isToday && assignedTasks.some(t => 
+                          t.employee_id === emp.id && !t.completed_at
+                        );
+
+                        const showExclamation = hasPendingTaskOnDate || hasAnyPendingTask;
                         
                         return (
                           <td 
@@ -902,9 +909,12 @@ export default function ScheduleView({ user }: { user: User | null }) {
                             )}
                             onClick={() => editable && openEditModal(emp.id, dateStr)}
                           >
-                            {hasPendingTask && (
+                            {showExclamation && (
                               <div className="absolute top-1 right-1 z-10">
-                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-sm animate-bounce">
+                                <span className={clsx(
+                                  "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white shadow-sm animate-bounce",
+                                  hasPendingTaskOnDate ? "bg-red-500" : "bg-amber-500"
+                                )}>
                                   !
                                 </span>
                               </div>
@@ -1000,13 +1010,20 @@ export default function ScheduleView({ user }: { user: User | null }) {
                         const taskTextColor = taskObj?.text_color;
                         const editable = canEdit(dateStr, sched?.start_time, emp.department);
 
-                        const hasPendingTask = assignedTasks.some(t => {
+                        const hasPendingTaskOnDate = assignedTasks.some(t => {
                           if (!t.due_date) return false;
                           const taskDate = t.due_date.split('T')[0];
                           return t.employee_id === emp.id && 
                                  taskDate === dateStr && 
                                  !t.completed_at;
                         });
+
+                        const isTodayCell = dateStr === format(new Date(), 'yyyy-MM-dd');
+                        const hasAnyPendingTask = isTodayCell && assignedTasks.some(t => 
+                          t.employee_id === emp.id && !t.completed_at
+                        );
+
+                        const showExclamation = hasPendingTaskOnDate || hasAnyPendingTask;
 
                         return (
                           <div 
@@ -1017,16 +1034,19 @@ export default function ScheduleView({ user }: { user: User | null }) {
                               editable ? "active:bg-slate-50 cursor-pointer" : ""
                             )}
                           >
-                            <div className="flex items-center gap-3">
-                              {hasPendingTask && (
-                                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white shadow-sm animate-bounce">
+                            {showExclamation && (
+                              <div className="absolute top-1 right-1 z-10">
+                                <span className={clsx(
+                                  "flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-white shadow-sm animate-bounce",
+                                  hasPendingTaskOnDate ? "bg-red-500" : "bg-amber-500"
+                                )}>
                                   !
                                 </span>
-                              )}
-                              <div>
-                                <div className="font-medium text-slate-800 text-sm">{emp.name}</div>
-                                <div className="text-xs text-slate-500 mt-0.5">{emp.code}</div>
                               </div>
+                            )}
+                            <div>
+                              <div className="font-medium text-slate-800 text-sm">{emp.name}</div>
+                              <div className="text-xs text-slate-500 mt-0.5">{emp.code}</div>
                             </div>
                             
                             {sched ? (

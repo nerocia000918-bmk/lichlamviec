@@ -122,6 +122,7 @@ export default function App() {
         const userWithNormalizedRole = { ...foundUser, role: normalizedRole };
         setUser(userWithNormalizedRole);
         setShowLogin(false);
+        setHasDismissedTasks(false); // Reset dismissal on login
         localStorage.setItem('user', JSON.stringify(userWithNormalizedRole));
         fetchPendingTasks(userWithNormalizedRole.id);
       } else {

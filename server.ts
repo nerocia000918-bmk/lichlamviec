@@ -1017,13 +1017,12 @@ async function startServer() {
       `).all(employee_id, department, employee_id);
     } else {
       tasks = db.prepare(`
-        SELECT t.*, e.name as creator_name, ta.status, ta.viewed_at, ta.completed_at, ta.received_at
+        SELECT t.*, e.name as creator_name, ta.employee_id, ta.status, ta.viewed_at, ta.completed_at, ta.received_at
         FROM assigned_tasks t
         JOIN employees e ON t.created_by = e.id
         JOIN task_assignments ta ON t.id = ta.task_id
-        WHERE ta.employee_id = ?
         ORDER BY t.created_at DESC
-      `).all(employee_id);
+      `).all();
     }
     res.json(tasks);
   });

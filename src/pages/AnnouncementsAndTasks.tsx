@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format, parseISO } from 'date-fns';
 import { User, socket } from '../App';
-import { Plus, Trash2, Edit2, CheckCircle2, Info, Users, User as UserIcon, Clock, X, CheckSquare, ListTodo, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Edit2, CheckCircle2, Info, Users, User as UserIcon, Clock, X, CheckSquare, ListTodo, AlertCircle, Check } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Announcement {
@@ -359,27 +359,27 @@ export default function AnnouncementsAndTasks({ user }: { user: User | null }) {
                         )}
                         
                         {(task.status === 'Received' || task.status === 'Completed') && (
-                          <button 
-                            onClick={() => handleTaskComplete(task.id, task.status !== 'Completed')}
-                            className={clsx(
-                              "flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-lg",
-                              task.status === 'Completed' 
-                                ? "bg-green-100 text-green-700 hover:bg-green-200" 
-                                : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100"
-                            )}
-                          >
-                            {task.status === 'Completed' ? (
-                              <>
-                                <CheckCircle2 className="w-5 h-5" />
-                                Đã hoàn thành
-                              </>
-                            ) : (
-                              <>
-                                <CheckSquare className="w-5 h-5" />
-                                Xác nhận hoàn thành
-                              </>
-                            )}
-                          </button>
+                          <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                            <button 
+                              onClick={() => handleTaskComplete(task.id, task.status !== 'Completed')}
+                              className={clsx(
+                                "w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-sm",
+                                task.status === 'Completed' 
+                                  ? "bg-green-500 text-white shadow-green-100" 
+                                  : "bg-white border-2 border-slate-300 text-slate-300 hover:border-indigo-500 hover:text-indigo-500"
+                              )}
+                            >
+                              <Check className={clsx("w-6 h-6", task.status === 'Completed' ? "scale-100" : "scale-0")} />
+                            </button>
+                            <div className="flex flex-col">
+                              <span className={clsx("text-sm font-black uppercase tracking-tight", task.status === 'Completed' ? "text-green-600" : "text-slate-500")}>
+                                {task.status === 'Completed' ? 'Đã hoàn tất' : 'Chưa hoàn tất'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">
+                                {task.status === 'Completed' ? 'Nhấp để bỏ tick' : 'Tick để xác nhận hoàn tất'}
+                              </span>
+                            </div>
+                          </div>
                         )}
                       </div>
                     ) : (
