@@ -873,13 +873,6 @@ async function startServer() {
     const reqData = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(id) as any;
     
     if (reqData) {
-      // If it was approved, clean up the schedule
-      if (reqData.status === 'Đã duyệt') {
-        db.prepare("DELETE FROM schedules WHERE date = ? AND employee_id = ? AND note = 'Nghỉ phép đã duyệt'")
-          .run(reqData.date, reqData.employee_id);
-        io.emit('schedules:updated');
-      }
-      
       db.prepare('DELETE FROM leave_requests WHERE id = ?').run(id);
       io.emit('leave_requests:updated');
       triggerSync();
