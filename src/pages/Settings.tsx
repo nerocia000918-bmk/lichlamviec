@@ -15,6 +15,7 @@ export default function Settings({
   setNotificationsEnabled: (val: boolean) => void
 }) {
   const [url, setUrl] = useState('');
+  const [tlLockHours, setTlLockHours] = useState('24');
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   
@@ -33,6 +34,8 @@ export default function Settings({
         .then(data => {
           const sheetUrl = data.find((s: any) => s.key === 'GOOGLE_SHEETS_URL');
           if (sheetUrl) setUrl(sheetUrl.value);
+          const tlLock = data.find((s: any) => s.key === 'TL_EDIT_LOCK_HOURS');
+          if (tlLock) setTlLockHours(tlLock.value);
         });
       
       fetch('/api/shifts')
@@ -77,18 +80,21 @@ export default function Settings({
   const handleSave = async () => {
     setStatus('saving');
     try {
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'GOOGLE_SHEETS_URL', value: url.trim() })
-      });
+      await Promise.all([
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'GOOGLE_SHEETS_URL', value: url.trim() })
+        }),
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'TL_EDIT_LOCK_HOURS', value: tlLockHours.toString() })
+        })
+      ]);
       
-      if (res.ok) {
-        setStatus('success');
-        setTimeout(() => setStatus('idle'), 3000);
-      } else {
-        setStatus('error');
-      }
+      setStatus('success');
+      setTimeout(() => setStatus('idle'), 3000);
     } catch (err) {
       setStatus('error');
     }
@@ -282,6 +288,53 @@ export default function Settings({
                 >
                   <Save className="w-4 h-4" />
                   {status === 'saving' ? 'Đang lưu...' : 'Lưu cài đặt'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center">
+                <Lock className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">Quyền hạn Tổ trưởng</h2>
+                <p className="text-sm text-slate-500">Tùy chỉnh thời gian khóa sửa lịch đối với cấp Tổ trưởng.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Thời gian khóa sửa lịch (giờ)</label>
+                <div className="flex items-center gap-4">
+                  <input 
+                    type="number" 
+                    value={tlLockHours}
+                    onChange={(e) => setTlLockHours(e.target.value)}
+                    min="0"
+                    max="168"
+                    className="w-32 p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  />
+                  <p className="text-sm text-slate-500 italic">
+                    {tlLockHours === '0' 
+                      ? "Tổ trưởng có thể sửa lịch bất cứ lúc nào (trừ tháng đã khóa)." 
+                      : `Tổ trưởng không thể sửa lịch cho các ca bắt đầu trong vòng ${tlLockHours} giờ tới.`}
+                  </p>
+                </div>
+                <p className="mt-2 text-xs text-amber-600 bg-amber-50 p-3 rounded-lg border border-amber-100">
+                  Lưu ý: Admin luôn có quyền sửa lịch bất kể thời gian, trừ khi tháng đó đã bị khóa hoàn toàn.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end pt-2">
+                <button 
+                  onClick={handleSave}
+                  disabled={status === 'saving'}
+                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  {status === 'saving' ? 'Đang lưu...' : 'Lưu quyền hạn'}
                 </button>
               </div>
             </div>

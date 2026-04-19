@@ -66,6 +66,7 @@ interface Announcement {
 export default function ScheduleView({ user }: { user: User | null }) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [settings, setSettings] = useState<any[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -110,17 +111,18 @@ export default function ScheduleView({ user }: { user: User | null }) {
 
   const fetchData = async () => {
     try {
-      const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes, assignedTaskRes] = await Promise.all([
+      const [empRes, shiftRes, schedRes, lockRes, annRes, taskRes, assignedTaskRes, settingsRes] = await Promise.all([
         fetch('/api/employees'),
         fetch('/api/shifts'),
         fetch(`/api/schedules?start=${format(weekDays[0], 'yyyy-MM-dd')}&end=${format(weekDays[6], 'yyyy-MM-dd')}`),
         fetch('/api/locked-months'),
         fetch(`/api/announcements${user ? `?employee_id=${user.id}&department=${encodeURIComponent(user.department)}` : ''}`),
         fetch('/api/tasks'),
-        fetch(`/api/assigned-tasks?employee_id=${user?.id || ''}&department=${encodeURIComponent(user?.department || '')}&role=${encodeURIComponent(user?.role || 'Nhân viên')}`)
+        fetch(`/api/assigned-tasks?employee_id=${user?.id || ''}&department=${encodeURIComponent(user?.department || '')}&role=${encodeURIComponent(user?.role || 'Nhân viên')}`),
+        fetch('/api/settings')
       ]);
       
-      if (!empRes.ok || !shiftRes.ok || !schedRes.ok || !lockRes.ok || !annRes.ok || !taskRes.ok || !assignedTaskRes.ok) {
+      if (!empRes.ok || !shiftRes.ok || !schedRes.ok || !lockRes.ok || !annRes.ok || !taskRes.ok || !assignedTaskRes.ok || !settingsRes.ok) {
         throw new Error('Fetch failed');
       }
       
@@ -131,6 +133,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
       const annData = await annRes.json();
       const taskData = await taskRes.json();
       const assignedTaskData = await assignedTaskRes.json();
+      const settingsData = await settingsRes.json();
 
       setEmployees(empData);
       setShifts(shiftData);
@@ -139,6 +142,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
       setAnnouncements(annData);
       setTasks(taskData);
       setAssignedTasks(Array.isArray(assignedTaskData) ? assignedTaskData : []);
+      setSettings(settingsData);
 
       if (user) {
         const active = annData.filter((a: Announcement) => !a.viewed_at);
@@ -552,12 +556,16 @@ export default function ScheduleView({ user }: { user: User | null }) {
     
     if (role === 'Tổ trưởng' && user?.department !== empDept) return false;
     
-    // 24h lock logic
+    // Configurable lock logic
     if (shiftStartTime) {
       const shiftDateTime = parseISO(`${dateStr}T${shiftStartTime}`);
       const now = new Date();
       const diffHours = (shiftDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-      if (diffHours < 24 && role !== 'Admin') return false; // Admin can override
+      
+      const tlLockSetting = settings.find(s => s.key === 'TL_EDIT_LOCK_HOURS');
+      const lockHours = tlLockSetting ? parseInt(tlLockSetting.value) : 24;
+      
+      if (diffHours < lockHours && role !== 'Admin') return false; // Admin can override
     }
     
     return true;
@@ -571,7 +579,12 @@ export default function ScheduleView({ user }: { user: User | null }) {
       if (isGuest || role === 'Nhân viên') return;
       if (isMonthLocked) return alert('Tháng này đã khóa lịch, không thể sửa!');
       if (role === 'Tổ trưởng' && user?.department !== emp?.department) return alert('Bạn chỉ được sửa lịch của bộ phận mình!');
-      if (role !== 'Admin') return alert('Không thể sửa lịch trước 24h!');
+      
+      if (role !== 'Admin') {
+        const tlLockSetting = settings.find(s => s.key === 'TL_EDIT_LOCK_HOURS');
+        const lockHours = tlLockSetting ? tlLockSetting.value : '24';
+        return alert(`Không thể sửa lịch trước ${lockHours}h!`);
+      }
     }
 
     setSelectedCell({ date: dateStr, empId });

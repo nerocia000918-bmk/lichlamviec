@@ -497,6 +497,12 @@ db.prepare("UPDATE employees SET password = ? WHERE role = 'Admin' AND (password
 
 seedTasks();
 
+// Initialize settings
+const tlLock = db.prepare('SELECT value FROM settings WHERE key = ?').get('TL_EDIT_LOCK_HOURS');
+if (!tlLock) {
+  db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run('TL_EDIT_LOCK_HOURS', '24');
+}
+
 try {
   db.exec('ALTER TABLE schedules ADD COLUMN note TEXT');
 } catch (e) {
