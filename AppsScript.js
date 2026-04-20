@@ -26,7 +26,7 @@ function doPost(e) {
     if (params.action === 'sync_all') {
       var data = params.data;
       
-      updateSheet(ss, 'Nhan_Vien', data.employees, ['id', 'code', 'name', 'department', 'role', 'phone', 'password']);
+      updateSheet(ss, 'Nhan_Vien', data.employees, ['id', 'code', 'name', 'department', 'role', 'phone', 'password', 'resigned_date', 'joined_date']);
       updateSheet(ss, 'DanhMuc_Ca', data.shifts, ['id', 'name', 'department', 'start_time', 'end_time', 'color', 'text_color']);
       updateSheet(ss, 'Lich_Lam_Viec', data.schedules, ['id', 'date', 'employee_id', 'shift_id', 'task', 'status', 'note']);
       updateSheet(ss, 'Thang_Chot', data.lockedMonths, ['month']);
@@ -86,7 +86,7 @@ function doGet(e) {
     if (!ss) throw new Error("Không thể kết nối với Google Sheet. Hãy mở script từ menu 'Tiện ích mở rộng' trong file Sheet.");
     
     var data = {
-      employees: getSheetData(ss, 'Nhan_Vien', ['id', 'code', 'name', 'department', 'role', 'phone', 'password']),
+      employees: getSheetData(ss, 'Nhan_Vien', ['id', 'code', 'name', 'department', 'role', 'phone', 'password', 'resigned_date', 'joined_date']),
       shifts: getSheetData(ss, 'DanhMuc_Ca', ['id', 'name', 'department', 'start_time', 'end_time', 'color', 'text_color']),
       schedules: getSheetData(ss, 'Lich_Lam_Viec', ['id', 'date', 'employee_id', 'shift_id', 'task', 'status', 'note']),
       lockedMonths: getSheetData(ss, 'Thang_Chot', ['month']),
