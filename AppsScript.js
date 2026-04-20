@@ -1,6 +1,13 @@
+// ==========================================
+// CẤU HÌNH QUAN TRỌNG (CHỈ NẾU GẶP LỖI)
+// Nếu bạn gặp lỗi "Không tìm thấy Spreadsheet", hãy dán ID của file Sheet vào đây.
+// ID là chuỗi ký tự nằm giữa /d/ và /edit trong đường dẫn trình duyệt của file Sheet.
+var SPREADSHEET_ID = ''; 
+// ==========================================
+
 function getSheetByNameCaseInsensitive(ss, name) {
   if (!ss) {
-    throw new Error("Không tìm thấy Spreadsheet. Hãy đảm bảo bạn đã mở Apps Script từ menu 'Tiện ích mở rộng' -> 'Apps Script' ngay trong file Google Sheet của bạn. Nếu bạn đang dùng script độc lập, hãy dùng SpreadsheetApp.openById('ID_FILE_SHEET').");
+    throw new Error("Không tìm thấy Spreadsheet. Nếu bạn đang chạy thử trong Apps Script Editor, hãy đảm bảo chọn đúng hàm doGet hoặc doPost. Nếu vẫn lỗi, hãy điền SPREADSHEET_ID ở đầu mã nguồn.");
   }
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
@@ -12,8 +19,22 @@ function getSheetByNameCaseInsensitive(ss, name) {
 }
 
 function getSpreadsheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) ss = SpreadsheetApp.getActive();
+  var ss = null;
+  try {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+  } catch (e) {}
+  
+  if (!ss) {
+    try {
+      ss = SpreadsheetApp.getActive();
+    } catch (e) {}
+  }
+  
+  if (!ss && SPREADSHEET_ID) {
+    try {
+      ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    } catch (e) {}
+  }
   return ss;
 }
 
