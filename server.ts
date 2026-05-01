@@ -95,7 +95,23 @@ function triggerSync() {
 }
 
 function normalizeDate(dateStr: any): string {
-  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  if (!dateStr) return '';
+  
+  // Handle numbers (Excel/Google Sheets date serials)
+  if (typeof dateStr === 'number') {
+    // 25569 is the offset between Unix epoch and Excel epoch (1970 - 1900)
+    // 30000 to 60000 covers roughly years 1982 to 2064
+    if (dateStr > 30000 && dateStr < 60000) {
+      const utc_days = Math.floor(dateStr - 25569);
+      const utc_value = utc_days * 86400;
+      const date_info = new Date(utc_value * 1000);
+      return date_info.toISOString().split('T')[0];
+    }
+    return String(dateStr);
+  }
+
+  if (typeof dateStr !== 'string') return String(dateStr);
+  
   let normalized = dateStr;
   if (dateStr.includes('T')) {
     const d = new Date(dateStr);
@@ -108,6 +124,15 @@ function normalizeDate(dateStr: any): string {
     const match = dateStr.match(/^(\d{4}-\d{2}-\d{2})/);
     if (match) {
       normalized = match[1];
+    } else {
+      // Handle DD/MM/YYYY
+      const ddmmyyyy = dateStr.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+      if (ddmmyyyy) {
+        const day = ddmmyyyy[1].padStart(2, '0');
+        const month = ddmmyyyy[2].padStart(2, '0');
+        const year = ddmmyyyy[3];
+        normalized = `${year}-${month}-${day}`;
+      }
     }
   }
   return normalized;
@@ -225,8 +250,12 @@ async function loadFromGoogleSheets() {
             let password = e.password !== undefined && e.password !== null ? String(e.password) : '';
             if (role === 'Admin' && !password) password = '1234';
             
-            const resignedDate = e.resigned_date ? normalizeDate(e.resigned_date) : null;
-            const joinedDate = e.joined_date ? normalizeDate(e.joined_date) : null;
+            // Flexible date field mapping
+            const rawResigned = e.resigned_date || e.resignedDate || e.ngay_nghi_viec || e['Ngày nghỉ việc'] || e['Resigned Date'] || e['resignedDate'];
+            const rawJoined = e.joined_date || e.joinedDate || e.ngay_vao_lam || e.joined_at || e['Ngày vào làm'] || e['Joined Date'] || e['joinedDate'] || e['Ngày vào'];
+            
+            const resignedDate = rawResigned ? normalizeDate(rawResigned) : null;
+            const joinedDate = rawJoined ? normalizeDate(rawJoined) : null;
             
             insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate);
           });
