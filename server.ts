@@ -189,27 +189,26 @@ async function loadFromGoogleSheets() {
         return { success: false, error: warnMsg };
       }
 
+      try {
+        db.pragma('foreign_keys = OFF');
+      } catch (e) {
+        console.warn('Could not disable foreign keys:', e);
+      }
+
       db.transaction(() => {
         console.log('Wiping local data and replacing with Sheet data...');
+        // Order: child tables first, then parent tables
+        db.prepare('DELETE FROM announcement_views').run();
+        db.prepare('DELETE FROM task_assignments').run();
+        db.prepare('DELETE FROM schedules').run();
+        db.prepare('DELETE FROM leave_requests').run();
+        db.prepare('DELETE FROM announcements').run();
+        db.prepare('DELETE FROM assigned_tasks').run();
         db.prepare('DELETE FROM employees').run();
         db.prepare('DELETE FROM shifts').run();
-        db.prepare('DELETE FROM schedules').run();
+        db.prepare('DELETE FROM tasks').run();
         db.prepare('DELETE FROM locked_months').run();
-        db.prepare('DELETE FROM announcements').run();
-        db.prepare('DELETE FROM leave_requests').run();
         
-        if (data.tasks && data.tasks.length > 0) {
-          db.prepare('DELETE FROM tasks').run();
-        }
-        
-        if (data.assignedTasks && data.assignedTasks.length > 0) {
-          db.prepare('DELETE FROM assigned_tasks').run();
-        }
-        
-        if (data.taskAssignments && data.taskAssignments.length > 0) {
-          db.prepare('DELETE FROM task_assignments').run();
-        }
-
         if (sheetEmpCount > 0) {
           const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date, joined_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
           let hasAdmin = false;
@@ -292,7 +291,6 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.tasks && data.tasks.length > 0) {
-          db.prepare('DELETE FROM tasks').run();
           const insertTask = db.prepare('INSERT INTO tasks (id, department, name, color, text_color) VALUES (?, ?, ?, ?, ?)');
           data.tasks.forEach((t: any) => insertTask.run(t.id, t.department, t.name, t.color, t.text_color));
         }
@@ -307,6 +305,12 @@ async function loadFromGoogleSheets() {
           data.taskAssignments.forEach((a: any) => insertAssign.run(a.task_id, a.employee_id, a.status, a.viewed_at, a.completed_at));
         }
       })();
+
+      try {
+        db.pragma('foreign_keys = ON');
+      } catch (e) {
+        console.warn('Could not re-enable foreign keys:', e);
+      }
       
       // Reconcile leave requests after loading from sheet
       reconcileLeaveRequestsWithSchedules();
@@ -348,6 +352,7 @@ db.exec(`
     department TEXT,
     role TEXT,
     phone TEXT,
+    password TEXT,
     resigned_date TEXT,
     joined_date TEXT
   );
@@ -448,6 +453,9 @@ db.exec(`
     FOREIGN KEY(employee_id) REFERENCES employees(id)
   );
 `);
+try { db.prepare("ALTER TABLE employees ADD COLUMN password TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE employees ADD COLUMN resigned_date TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE employees ADD COLUMN joined_date TEXT").run(); } catch (e) {}
 
 // Add received_at column if not exists
 try {
