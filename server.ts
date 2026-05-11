@@ -254,8 +254,22 @@ async function loadFromGoogleSheets() {
             const rawResigned = e.resigned_date || e.resignedDate || e.ngay_nghi_viec || e['Ngày nghỉ việc'] || e['Resigned Date'] || e['resignedDate'];
             const rawJoined = e.joined_date || e.joinedDate || e.ngay_vao_lam || e.joined_at || e['Ngày vào làm'] || e['Joined Date'] || e['joinedDate'] || e['Ngày vào'];
             
-            const resignedDate = rawResigned ? normalizeDate(rawResigned) : null;
-            const joinedDate = rawJoined ? normalizeDate(rawJoined) : null;
+            let resignedDate = rawResigned ? normalizeDate(rawResigned) : null;
+            let joinedDate = rawJoined ? normalizeDate(rawJoined) : null;
+            
+            // Persistence recovery logic
+            let persistence = db.prepare('SELECT joined_date, resigned_date FROM employee_date_persistence WHERE code = ?').get(e.code) as any;
+            if (!persistence && e.name) {
+              persistence = db.prepare('SELECT joined_date, resigned_date FROM employee_date_persistence WHERE name = ?').get(e.name) as any;
+            }
+            if (!joinedDate && persistence && persistence.joined_date) joinedDate = persistence.joined_date;
+            if (!resignedDate && persistence && persistence.resigned_date) resignedDate = persistence.resigned_date;
+            
+            // Save to persistence
+            if (joinedDate || resignedDate) {
+              db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date) VALUES (?, ?, ?, ?)')
+                .run(e.code, e.name, joinedDate, resignedDate);
+            }
             
             insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate);
           });
@@ -436,6 +450,13 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS employee_date_persistence (
+    code TEXT PRIMARY KEY,
+    name TEXT,
+    joined_date TEXT,
+    resigned_date TEXT
   );
 
   CREATE TABLE IF NOT EXISTS leave_requests (
@@ -619,6 +640,13 @@ async function startServer() {
     try {
       const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date, joined_date) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(code, name, department, role, phone, resigned_date || null, joined_date || null);
+      
+      // Save to persistence
+      if (joined_date || resigned_date) {
+        db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date) VALUES (?, ?, ?, ?)')
+          .run(code, name, joined_date || null, resigned_date || null);
+      }
+
       const newEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(result.lastInsertRowid);
       io.emit('employees:updated');
       triggerSync();
@@ -633,6 +661,13 @@ async function startServer() {
     try {
       db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ?, joined_date = ? WHERE id = ?')
         .run(code, name, department, role, phone, resigned_date || null, joined_date || null, req.params.id);
+      
+      // Save to persistence
+      if (joined_date || resigned_date) {
+        db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date) VALUES (?, ?, ?, ?)')
+          .run(code, name, joined_date || null, resigned_date || null);
+      }
+
       io.emit('employees:updated');
       io.emit('schedules:updated');
       triggerSync();
