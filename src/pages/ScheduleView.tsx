@@ -4,7 +4,7 @@ import React from 'react';
 import { format, addDays, startOfWeek, subWeeks, isBefore, addHours, parseISO, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { User, socket } from '../App';
-import { ChevronLeft, ChevronRight, Copy, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, Wand2, X, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, X, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Employee {
@@ -235,20 +235,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const handleNextWeek = () => setCurrentDate(addDays(currentDate, 7));
   const handleCurrentWeek = () => setCurrentDate(new Date());
 
-  const handleCopyWeek = async () => {
-    if (isMonthLocked) return alert('Tháng này đã khóa lịch!');
-    if (!confirm('Bạn có chắc muốn copy lịch từ tuần trước sang tuần này?')) return;
-    
-    const prevWeekStart = format(subWeeks(weekStart, 1), 'yyyy-MM-dd');
-    const currWeekStart = format(weekStart, 'yyyy-MM-dd');
-    
-    await fetch('/api/schedules/copy-week', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fromStartDate: prevWeekStart, toStartDate: currWeekStart })
-    });
-  };
-
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -296,213 +282,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
       setCurrentAnnIndex(0);
     }
     fetchData();
-  };
-
-  const autoScheduleSales = async () => {
-    if (isMonthLocked) return alert('Tháng này đã khóa lịch!');
-    
-    const salesEmps = employees.filter(e => {
-      if (e.resigned_date) {
-        const resignedDate = new Date(e.resigned_date);
-        resignedDate.setHours(0, 0, 0, 0);
-        const weekStartLocal = new Date(weekStart);
-        weekStartLocal.setHours(0, 0, 0, 0);
-        if (resignedDate < weekStartLocal) return false;
-      }
-      if (e.joined_date) {
-        const joinedDate = new Date(e.joined_date);
-        joinedDate.setHours(0, 0, 0, 0);
-        const weekEndLocal = new Date(weekDays[6]);
-        weekEndLocal.setHours(23, 59, 59, 999);
-        if (joinedDate > weekEndLocal) return false;
-      }
-      return e.department === 'Bán hàng';
-    });
-    if (salesEmps.length < 5) {
-      alert('Cần ít nhất 5 nhân viên Bán hàng để xếp lịch tự động!');
-      return;
-    }
-
-    const morningShift = shifts.find(s => s.name === 'SÁNG');
-    const afternoonShift = shifts.find(s => s.name === 'CHIỀU');
-    const offShift = shifts.find(s => s.name === 'OFF TUẦN');
-
-    if (!morningShift || !afternoonShift || !offShift) {
-      alert('Không tìm thấy ca SÁNG, CHIỀU hoặc OFF TUẦN trong hệ thống!');
-      return;
-    }
-
-    if (!confirm('Hệ thống sẽ tự động xếp lịch cho bộ phận Bán hàng tuần này. Các ca đã xếp (trừ ca OFF) sẽ bị ghi đè. Bạn có chắc chắn?')) return;
-
-    const days = weekDays.map(d => format(d, 'yyyy-MM-dd'));
-    
-    // Get current schedules for this week for sales
-    const currentWeekSchedules = schedules.filter(s => 
-      salesEmps.some(e => e.id === s.employee_id) && 
-      days.includes(s.date)
-    );
-
-    // Determine OFF days
-    const empOffDays = new Map<number, string[]>();
-    salesEmps.forEach(emp => empOffDays.set(emp.id, []));
-
-    currentWeekSchedules.forEach(s => {
-      if (s.shift_name.includes('OFF')) {
-        empOffDays.get(s.employee_id)?.push(s.date);
-      }
-    });
-
-    // Assign missing OFFs to balance staff per day
-    for (const emp of salesEmps) {
-      if (empOffDays.get(emp.id)?.length === 0) {
-        let minOffs = 999;
-        let bestDay = days[0];
-        for (const day of days) {
-          let offCount = 0;
-          empOffDays.forEach(offs => {
-            if (offs.includes(day)) offCount++;
-          });
-          if (offCount < minOffs) {
-            minOffs = offCount;
-            bestDay = day;
-          }
-        }
-        empOffDays.get(emp.id)?.push(bestDay);
-      }
-    }
-
-    const newSchedules: any[] = [];
-    let prevAfternoonEmps: Employee[] = [];
-    let prevAfternoonHotline: Employee | null = null;
-
-    for (let i = 0; i < days.length; i++) {
-      const day = days[i];
-      const workingEmps = salesEmps.filter(emp => !empOffDays.get(emp.id)?.includes(day));
-      const offEmps = salesEmps.filter(emp => empOffDays.get(emp.id)?.includes(day));
-
-      // Add OFF schedules
-      offEmps.forEach(emp => {
-        const existing = currentWeekSchedules.find(s => s.employee_id === emp.id && s.date === day);
-        if (!existing) {
-          newSchedules.push({
-            date: day,
-            employee_id: emp.id,
-            shift_id: offShift.id,
-            task: 'Không',
-            status: 'Published'
-          });
-        }
-      });
-
-      let morningPool: Employee[] = [];
-      let afternoonPool: Employee[] = [];
-      let unassigned = [...workingEmps];
-
-      // Rule: Day before OFF -> Morning
-      const nextDay = i < days.length - 1 ? days[i+1] : null;
-      if (nextDay) {
-        const offNextDay = unassigned.filter(emp => empOffDays.get(emp.id)?.includes(nextDay));
-        offNextDay.forEach(emp => {
-          if (morningPool.length < 2) {
-            morningPool.push(emp);
-            unassigned = unassigned.filter(e => e.id !== emp.id);
-          }
-        });
-      }
-
-      // Rule: Day after OFF -> Afternoon
-      const prevDay = i > 0 ? days[i-1] : null;
-      if (prevDay) {
-        const offPrevDay = unassigned.filter(emp => empOffDays.get(emp.id)?.includes(prevDay));
-        offPrevDay.forEach(emp => {
-          if (afternoonPool.length < 3) {
-            afternoonPool.push(emp);
-            unassigned = unassigned.filter(e => e.id !== emp.id);
-          }
-        });
-      }
-
-      // Fill remaining Morning
-      while (morningPool.length < 2 && unassigned.length > 0) {
-        morningPool.push(unassigned.pop()!);
-      }
-
-      // Fill remaining Afternoon
-      while (afternoonPool.length < 3 && unassigned.length > 0) {
-        afternoonPool.push(unassigned.pop()!);
-      }
-
-      // If we still have unassigned, put them in Afternoon
-      unassigned.forEach(emp => afternoonPool.push(emp));
-
-      // Assign Tasks for Morning (1 Hotline, 1 Trực cửa)
-      let morningHotline: Employee | null = null;
-      let morningTruc: Employee | null = null;
-
-      if (prevAfternoonHotline && morningPool.some(e => e.id === prevAfternoonHotline!.id)) {
-        morningHotline = morningPool.find(e => e.id === prevAfternoonHotline!.id) || null;
-      } else if (prevAfternoonEmps.length > 0) {
-        const candidate = morningPool.find(e => prevAfternoonEmps.some(pe => pe.id === e.id));
-        if (candidate) morningHotline = candidate;
-      }
-
-      if (!morningHotline && morningPool.length > 0) {
-        morningHotline = morningPool[0];
-      }
-
-      morningTruc = morningPool.find(e => e.id !== morningHotline?.id) || morningPool[1];
-
-      morningPool.forEach(emp => {
-        let task = 'Không';
-        if (emp.id === morningHotline?.id) task = 'Hotline';
-        else if (emp.id === morningTruc?.id) task = 'Trực cửa';
-
-        newSchedules.push({
-          date: day,
-          employee_id: emp.id,
-          shift_id: morningShift.id,
-          task: task,
-          status: 'Published'
-        });
-      });
-
-      // Assign Tasks for Afternoon (1 Hotline, 1 Trực cửa, 1 Vệ sinh)
-      let afternoonHotline = afternoonPool[0];
-      let afternoonTruc = afternoonPool[1];
-      let afternoonVeSinh = afternoonPool[2];
-
-      afternoonPool.forEach(emp => {
-        let task = 'Không';
-        if (emp.id === afternoonHotline?.id) task = 'Hotline';
-        else if (emp.id === afternoonTruc?.id) task = 'Trực cửa';
-        else if (emp.id === afternoonVeSinh?.id) task = 'Vệ sinh';
-
-        newSchedules.push({
-          date: day,
-          employee_id: emp.id,
-          shift_id: afternoonShift.id,
-          task: task,
-          status: 'Published'
-        });
-      });
-
-      prevAfternoonEmps = afternoonPool;
-      prevAfternoonHotline = afternoonHotline;
-    }
-
-    try {
-      const res = await fetch('/api/schedules/bulk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedules: newSchedules })
-      });
-      if (res.ok) {
-        alert('Lịch đã được tối ưu hóa!');
-        fetchData();
-      }
-    } catch (e) {
-      alert('Lỗi khi xếp lịch tự động');
-    }
   };
 
   const handleClearWeek = async () => {
@@ -823,20 +602,6 @@ export default function ScheduleView({ user }: { user: User | null }) {
 
           {(role === 'Admin' || role === 'Tổ trưởng') && (
             <div className="flex flex-wrap justify-center sm:justify-end gap-2 w-full lg:w-auto">
-              <button 
-                onClick={autoScheduleSales}
-                className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-100 px-3 py-2 rounded-xl hover:bg-emerald-100 transition-colors text-xs font-bold"
-              >
-                <Wand2 className="w-3.5 h-3.5" />
-                Auto Bán hàng
-              </button>
-              <button 
-                onClick={handleCopyWeek}
-                className="flex items-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-2 rounded-xl hover:bg-indigo-100 transition-colors text-xs font-bold"
-              >
-                <Copy className="w-3.5 h-3.5" />
-                Copy tuần trước
-              </button>
               <button 
                 onClick={addAnnouncement}
                 className="flex items-center gap-2 bg-amber-50 text-amber-700 border border-amber-100 px-3 py-2 rounded-xl hover:bg-amber-100 transition-colors text-xs font-bold"

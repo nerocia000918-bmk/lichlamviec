@@ -735,51 +735,6 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post('/api/schedules/copy-week', (req, res) => {
-    const { fromStartDate, toStartDate } = req.body;
-    const fromDateObj = new Date(fromStartDate);
-    const toDateObj = new Date(toStartDate);
-    
-    const diffTime = toDateObj.getTime() - fromDateObj.getTime();
-    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-    
-    const schedulesToCopy = db.prepare(`
-      SELECT * FROM schedules 
-      WHERE date >= ? AND date <= date(?, '+6 days')
-    `).all(fromStartDate, fromStartDate) as any[];
-
-    const insertStmt = db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)');
-    const checkStmt = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?');
-    const updateStmt = db.prepare('UPDATE schedules SET shift_id = ?, task = ?, status = ?, note = ? WHERE id = ?');
-
-    const transaction = db.transaction((schedules) => {
-      for (const s of schedules) {
-        const oldDate = new Date(s.date);
-        const newDate = new Date(oldDate.getTime() + diffDays * 24 * 60 * 60 * 1000);
-        const newDateStr = newDate.toISOString().split('T')[0];
-        
-        // Check if employee is still active at newDateStr
-        const emp = db.prepare('SELECT joined_date, resigned_date FROM employees WHERE id = ?').get(s.employee_id) as any;
-        if (emp) {
-          if (emp.joined_date && newDateStr < emp.joined_date) continue;
-          if (emp.resigned_date && newDateStr > emp.resigned_date) continue;
-        }
-
-        const existing = checkStmt.get(newDateStr, s.employee_id) as any;
-        if (existing) {
-          updateStmt.run(s.shift_id, s.task, s.status, s.note || '', existing.id);
-        } else {
-          insertStmt.run(newDateStr, s.employee_id, s.shift_id, s.task, s.status, s.note || '');
-        }
-      }
-    });
-
-    transaction(schedulesToCopy);
-    io.emit('schedules:updated');
-    triggerSync();
-    res.json({ success: true });
-  });
-
   app.get('/api/announcements', (req, res) => {
     const { employee_id, department } = req.query;
     const now = new Date().toISOString();
@@ -946,29 +901,6 @@ async function startServer() {
       db.prepare('DELETE FROM schedules WHERE date >= ? AND date <= ?').run(start, end);
     }
     
-    io.emit('schedules:updated');
-    triggerSync();
-    res.json({ success: true });
-  });
-
-  app.post('/api/schedules/bulk', (req, res) => {
-    const { schedules } = req.body;
-    const insertStmt = db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)');
-    const updateStmt = db.prepare('UPDATE schedules SET shift_id = ?, task = ?, status = ?, note = ? WHERE id = ?');
-    const checkStmt = db.prepare('SELECT id FROM schedules WHERE date = ? AND employee_id = ?');
-
-    const transaction = db.transaction((scheds) => {
-      for (const s of scheds) {
-        const existing = checkStmt.get(s.date, s.employee_id) as any;
-        if (existing) {
-          updateStmt.run(s.shift_id, s.task, s.status, s.note || '', existing.id);
-        } else {
-          insertStmt.run(s.date, s.employee_id, s.shift_id, s.task, s.status, s.note || '');
-        }
-      }
-    });
-
-    transaction(schedules);
     io.emit('schedules:updated');
     triggerSync();
     res.json({ success: true });
