@@ -5,12 +5,28 @@
 var SPREADSHEET_ID = ''; 
 // ==========================================
 
-// Danh sách bí danh cột (aliases) giúp tự động nhận diện cả tiếng Anh và tiếng Việt
+/**
+ * Hàm chuẩn hóa chuỗi và loại bỏ dấu tiếng Việt để đối chiếu tiêu đề cột chính xác 100%
+ */
+function removeVietnameseTones(str) {
+  if (!str) return '';
+  str = str.toString().toLowerCase().trim();
+  str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+  str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+  str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+  str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+  str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+  str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+  str = str.replace(/đ/g, "d");
+  return str.replace(/[\s_\-]+/g, '');
+}
+
+// Danh sách bí danh cột (aliases) nhận diện linh hoạt mọi biến thể tiếng Anh và tiếng Việt
 var COLUMN_ALIASES = {
-  'joined_date': ['joined_date', 'joineddate', 'start_date', 'startdate', 'ngay_vao_lam', 'ngayvaolam', 'ngày vào làm', 'ngày bắt đầu', 'ngay_bat_dau', 'joined_at', 'batdau', 'start', 'start date', 'joined date'],
-  'resigned_date': ['resigned_date', 'resigneddate', 'end_date', 'enddate', 'ngay_nghi_viec', 'ngaynghiviec', 'ngày nghỉ việc', 'ngày nghỉ', 'ngay_nghi', 'resigned', 'end', 'end date', 'resigned date'],
-  'start_date': ['start_date', 'startdate', 'joined_date', 'joineddate', 'ngay_vao_lam', 'ngayvaolam', 'ngày vào làm', 'ngày bắt đầu', 'ngay_bat_dau', 'joined_at', 'batdau', 'start', 'start date'],
-  'end_date': ['end_date', 'enddate', 'resigned_date', 'resigneddate', 'ngay_nghi_viec', 'ngaynghiviec', 'ngày nghỉ việc', 'ngày nghỉ', 'ngay_nghi', 'resigned', 'end', 'end date'],
+  'start_date': ['start_date', 'startdate', 'joined_date', 'joineddate', 'ngay_vao_lam', 'ngayvaolam', 'ngày vào làm', 'ngày bắt đầu', 'ngay_bat_dau', 'joined_at', 'batdau', 'start', 'start date', 'ngayvao', 'ngày vào'],
+  'end_date': ['end_date', 'enddate', 'resigned_date', 'resigneddate', 'ngay_nghi_viec', 'ngaynghiviec', 'ngày nghỉ việc', 'ngày nghỉ', 'ngay_nghi', 'resigned', 'end', 'end date', 'ngaynghi'],
+  'joined_date': ['joined_date', 'joineddate', 'start_date', 'startdate', 'ngay_vao_lam', 'ngayvaolam', 'ngày vào làm', 'ngày bắt đầu', 'ngay_bat_dau', 'joined_at', 'batdau', 'start', 'start date', 'joined date', 'ngayvao', 'ngày vào'],
+  'resigned_date': ['resigned_date', 'resigneddate', 'end_date', 'enddate', 'ngay_nghi_viec', 'ngaynghiviec', 'ngày nghỉ việc', 'ngày nghỉ', 'ngay_nghi', 'resigned', 'end', 'end date', 'resigned date', 'ngaynghi'],
   'code': ['code', 'mã nv', 'manv', 'mã nhân viên', 'ma_nv', 'idnv', 'emp_code', 'ma'],
   'name': ['name', 'họ tên', 'tên', 'hoten', 'ten', 'full_name', 'employee_name', 'tên nhân viên'],
   'department': ['department', 'bộ phận', 'bophan', 'phòng ban', 'phongban', 'dept'],
@@ -26,17 +42,16 @@ var COLUMN_ALIASES = {
 };
 
 function normalizeHeader(h) {
-  if (!h) return '';
-  return h.toString().toLowerCase().trim().replace(/[\s_\-]+/g, '');
+  return removeVietnameseTones(h);
 }
 
 function findColumnIndex(headers, standardCol) {
-  var stdNorm = normalizeHeader(standardCol);
+  var stdNorm = removeVietnameseTones(standardCol);
   var aliases = COLUMN_ALIASES[standardCol] || [standardCol];
-  var normalizedAliases = aliases.map(normalizeHeader);
+  var normalizedAliases = aliases.map(removeVietnameseTones);
   
   for (var i = 0; i < headers.length; i++) {
-    var h = normalizeHeader(headers[i]);
+    var h = removeVietnameseTones(headers[i]);
     if (h === stdNorm || normalizedAliases.indexOf(h) !== -1) {
       return i;
     }
@@ -46,7 +61,7 @@ function findColumnIndex(headers, standardCol) {
 
 function getSheetByNameCaseInsensitive(ss, name) {
   if (!ss) {
-    throw new Error("Không tìm thấy Spreadsheet. Nếu bạn đang chạy thử trong Apps Script Editor, hãy đảm bảo chọn đúng hàm doGet hoặc doPost. Nếu vẫn lỗi, hãy điền SPREADSHEET_ID ở đầu mã nguồn.");
+    throw new Error("Không tìm thấy Spreadsheet. Hãy điền SPREADSHEET_ID ở đầu mã nguồn nếu chạy độc lập.");
   }
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
@@ -79,9 +94,7 @@ function getSpreadsheet() {
 
 /**
  * ĐẢM BẢO CHẮC CHẮN CÓ 2 CỘT start_date VÀ end_date TRÊN DÒNG 1.
- * - Nếu Sheet có cột joined_date -> tự động đổi tên thành start_date hoặc thêm start_date.
- * - Nếu Sheet có cột resigned_date -> tự động đổi tên thành end_date hoặc thêm end_date.
- * - Nếu chưa có bất kỳ cột nào -> tự động thêm start_date và end_date vào cuối dòng 1.
+ * Tuyệt đối không ghi đè lẫn nhau, không làm mất dữ liệu.
  */
 function ensureEmployeeDateColumns(sheet) {
   if (!sheet) return [];
@@ -92,50 +105,47 @@ function ensureEmployeeDateColumns(sheet) {
     headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   }
   
+  // Lọc bỏ các ô rỗng ở cuối nếu có
+  while (headers.length > 0 && (!headers[headers.length - 1] || headers[headers.length - 1].toString().trim() === '')) {
+    headers.pop();
+  }
+  
   // Nếu sheet hoàn toàn chưa có cột nào
-  if (headers.length === 0 || headers.every(function(h) { return !h || h.toString().trim() === ''; })) {
+  if (headers.length === 0) {
     headers = ['id', 'code', 'name', 'department', 'role', 'phone', 'password', 'start_date', 'end_date'];
     sheet.appendRow(headers);
+    SpreadsheetApp.flush();
     return headers;
   }
   
   var hasStartDate = false;
   var hasEndDate = false;
-  var joinedDateIdx = -1;
-  var resignedDateIdx = -1;
   
   for (var i = 0; i < headers.length; i++) {
-    var hNorm = normalizeHeader(headers[i]);
-    if (hNorm === 'startdate' || hNorm === 'start_date') hasStartDate = true;
-    if (hNorm === 'enddate' || hNorm === 'end_date') hasEndDate = true;
-    if (hNorm === 'joineddate' || hNorm === 'joined_date') joinedDateIdx = i;
-    if (hNorm === 'resigneddate' || hNorm === 'resigned_date') resignedDateIdx = i;
+    var hNorm = removeVietnameseTones(headers[i]);
+    if (hNorm === 'startdate' || hNorm === 'joineddate' || hNorm === 'ngayvaolam' || hNorm === 'ngaybatdau' || hNorm === 'ngayvao') {
+      hasStartDate = true;
+    }
+    if (hNorm === 'enddate' || hNorm === 'resigneddate' || hNorm === 'ngaynghiviec' || hNorm === 'ngaynghi') {
+      hasEndDate = true;
+    }
   }
   
-  // Đảm bảo có cột start_date
+  // Nếu chưa có cột ngày bắt đầu -> thêm cột start_date
   if (!hasStartDate) {
-    if (joinedDateIdx !== -1) {
-      sheet.getRange(1, joinedDateIdx + 1).setValue('start_date');
-      headers[joinedDateIdx] = 'start_date';
-    } else {
-      var col1 = sheet.getLastColumn() + 1;
-      sheet.getRange(1, col1).setValue('start_date');
-      headers.push('start_date');
-    }
+    var col1 = headers.length + 1;
+    sheet.getRange(1, col1).setValue('start_date');
+    headers.push('start_date');
   }
   
-  // Đảm bảo có cột end_date
+  // Nếu chưa có cột ngày nghỉ việc -> thêm cột end_date
   if (!hasEndDate) {
-    if (resignedDateIdx !== -1) {
-      sheet.getRange(1, resignedDateIdx + 1).setValue('end_date');
-      headers[resignedDateIdx] = 'end_date';
-    } else {
-      var col2 = sheet.getLastColumn() + 1;
-      sheet.getRange(1, col2).setValue('end_date');
-      headers.push('end_date');
-    }
+    var col2 = headers.length + 1;
+    sheet.getRange(1, col2).setValue('end_date');
+    headers.push('end_date');
   }
   
+  SpreadsheetApp.flush();
   return headers;
 }
 
@@ -150,7 +160,7 @@ function taoVaCapNhatCotNgay() {
   if (!sheet) sheet = ss.insertSheet('Nhan_Vien');
   
   var headers = ensureEmployeeDateColumns(sheet);
-  Logger.log("✅ Đã kiểm tra tiêu đề các cột: " + JSON.stringify(headers));
+  Logger.log("✅ Đã kiểm tra và hoàn thiện các cột trong Nhan_Vien: " + JSON.stringify(headers));
 }
 
 function onOpen() {
@@ -173,6 +183,11 @@ function doPost(e) {
     var ss = getSpreadsheet();
     if (!ss) throw new Error("Không thể kết nối với Google Sheet. Hãy mở script từ menu 'Tiện ích mở rộng' trong file Sheet.");
     
+    if (!e || !e.postData || !e.postData.contents) {
+      return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'Không nhận được dữ liệu tải lên' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     var params = JSON.parse(e.postData.contents);
     if (params.action === 'sync_all') {
       var data = params.data;
@@ -195,9 +210,12 @@ function doPost(e) {
         updateSheetSafe(ss, 'PhanCong_NhiemVu', data.taskAssignments, ['task_id', 'employee_id', 'status', 'viewed_at', 'received_at', 'completed_at']);
       }
       
-      return ContentService.createTextOutput(JSON.stringify({ success: true }))
+      return ContentService.createTextOutput(JSON.stringify({ success: true, updated_employees: (data.employees ? data.employees.length : 0) }))
         .setMimeType(ContentService.MimeType.JSON);
     }
+
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'Hành động không xác định' }))
+      .setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({ success: false, error: error.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -244,7 +262,7 @@ function updateEmployeeSheet(ss, sheetName, employees) {
   var startColIndices = [];
   var endColIndices = [];
   for (var h = 0; h < headers.length; h++) {
-    var hNorm = normalizeHeader(headers[h]);
+    var hNorm = removeVietnameseTones(headers[h]);
     if (hNorm === 'startdate' || hNorm === 'joineddate' || hNorm === 'ngayvaolam' || hNorm === 'ngaybatdau' || hNorm === 'ngayvao') {
       startColIndices.push(h);
     }
@@ -275,7 +293,7 @@ function updateEmployeeSheet(ss, sheetName, employees) {
       var row = new Array(headers.length);
       for (var c = 0; c < headers.length; c++) {
         var hName = headers[c].toString().toLowerCase().trim();
-        var hNorm = normalizeHeader(headers[c]);
+        var hNorm = removeVietnameseTones(headers[c]);
         var oldVal = oldRow ? oldRow[c] : '';
         
         var isStartDate = (startColIndices.indexOf(c) !== -1);
@@ -283,20 +301,20 @@ function updateEmployeeSheet(ss, sheetName, employees) {
         
         var newVal = '';
         if (isStartDate) {
-          newVal = emp.start_date || emp.joined_date || emp['Ngày vào làm'] || emp['Ngày bắt đầu'] || '';
-          // Nếu giá trị gửi lên rỗng nhưng ô cũ trong sheet đã có ngày -> giữ nguyên ô cũ
+          newVal = emp.start_date || emp.joined_date || emp['Ngày vào làm'] || emp['Ngày bắt đầu'] || emp['ngay_bat_dau'] || '';
+          // Nếu giá trị gửi lên rỗng nhưng ô cũ trong sheet đã có ngày -> giữ lại ô cũ
           if ((!newVal || newVal === '') && oldVal !== '' && oldVal !== null && oldVal !== undefined) {
             newVal = oldVal;
           }
         } else if (isEndDate) {
-          newVal = emp.end_date || emp.resigned_date || emp['Ngày nghỉ việc'] || '';
+          newVal = emp.end_date || emp.resigned_date || emp['Ngày nghỉ việc'] || emp['Ngày nghỉ'] || emp['ngay_nghi_viec'] || '';
           if ((!newVal || newVal === '') && oldVal !== '' && oldVal !== null && oldVal !== undefined) {
             newVal = oldVal;
           }
         } else {
           for (var stdKey in COLUMN_ALIASES) {
-            var aliases = COLUMN_ALIASES[stdKey].map(normalizeHeader);
-            if (hNorm === normalizeHeader(stdKey) || aliases.indexOf(hNorm) !== -1) {
+            var aliases = COLUMN_ALIASES[stdKey].map(removeVietnameseTones);
+            if (hNorm === removeVietnameseTones(stdKey) || aliases.indexOf(hNorm) !== -1) {
               if (emp[stdKey] !== undefined && emp[stdKey] !== null) {
                 newVal = emp[stdKey];
               }
@@ -317,7 +335,7 @@ function updateEmployeeSheet(ss, sheetName, employees) {
           var d = newVal.getDate().toString().padStart(2, '0');
           newVal = y + '-' + m + '-' + d;
         } else if (newVal !== undefined && newVal !== null) {
-          newVal = newVal.toString();
+          newVal = newVal.toString().trim();
         } else {
           newVal = '';
         }
@@ -337,6 +355,8 @@ function updateEmployeeSheet(ss, sheetName, employees) {
   } else if (lastRow > 1) {
     sheet.getRange(2, 1, lastRow - 1, headers.length).clearContent();
   }
+  
+  SpreadsheetApp.flush();
 }
 
 /**
@@ -356,23 +376,28 @@ function updateSheetSafe(ss, sheetName, items, columns) {
     headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   }
   
-  if (headers.length === 0 || headers.every(function(h) { return !h || h.toString().trim() === ''; })) {
+  while (headers.length > 0 && (!headers[headers.length - 1] || headers[headers.length - 1].toString().trim() === '')) {
+    headers.pop();
+  }
+  
+  if (headers.length === 0) {
     headers = columns;
     sheet.appendRow(headers);
     lastCol = headers.length;
     lastRow = 1;
+    SpreadsheetApp.flush();
   }
   
   if (items && items.length > 0) {
     var rows = items.map(function(item) {
       return headers.map(function(colHeader) {
-        var hNorm = normalizeHeader(colHeader);
+        var hNorm = removeVietnameseTones(colHeader);
         var val = '';
         
         for (var k = 0; k < columns.length; k++) {
           var std = columns[k];
-          var aliases = (COLUMN_ALIASES[std] || [std]).map(normalizeHeader);
-          if (hNorm === normalizeHeader(std) || aliases.indexOf(hNorm) !== -1) {
+          var aliases = (COLUMN_ALIASES[std] || [std]).map(removeVietnameseTones);
+          if (hNorm === removeVietnameseTones(std) || aliases.indexOf(hNorm) !== -1) {
             val = item[std];
             break;
           }
@@ -415,6 +440,8 @@ function updateSheetSafe(ss, sheetName, items, columns) {
   } else if (lastRow > 1) {
     sheet.getRange(2, 1, lastRow - 1, headers.length).clearContent();
   }
+
+  SpreadsheetApp.flush();
 }
 
 function doGet(e) {
@@ -455,7 +482,7 @@ function getSheetData(ss, sheetName, columns) {
   var data = sheet.getDataRange().getValues();
   if (data.length <= 1) return [];
   
-  var headers = data[0].map(function(h) { return h.toString().toLowerCase().trim(); });
+  var headers = data[0].map(function(h) { return h ? h.toString().toLowerCase().trim() : ''; });
   var result = [];
   
   for (var i = 1; i < data.length; i++) {

@@ -19,6 +19,15 @@ interface Employee {
 const DEPARTMENTS = ['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho'];
 const ROLES = ['Admin', 'Tổ trưởng', 'Nhân viên'];
 
+const formatDateDisplay = (dateStr?: string | null) => {
+  if (!dateStr) return null;
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('vi-VN');
+};
+
 export default function EmployeeList({ role }: { role: Role }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [search, setSearch] = useState('');
@@ -109,22 +118,32 @@ export default function EmployeeList({ role }: { role: Role }) {
     const url = editingId ? `/api/employees/${editingId}` : '/api/employees';
     const method = editingId ? 'PUT' : 'POST';
     
+    const startDateVal = formData.start_date || formData.joined_date || '';
+    const endDateVal = formData.end_date || formData.resigned_date || '';
+
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...formData,
-        start_date: formData.joined_date,
-        end_date: formData.resigned_date,
-        joined_date: formData.joined_date,
-        resigned_date: formData.resigned_date
+        start_date: startDateVal,
+        end_date: endDateVal,
+        joined_date: startDateVal,
+        resigned_date: endDateVal
       })
     });
     
     if (res.ok) {
       setShowForm(false);
       fetchEmployees();
-      fetch('/api/sync-to-sheets', { method: 'POST' }).catch(() => {});
+      fetch('/api/sync-to-sheets', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.success) {
+            console.log('Đã tự động đồng bộ lên Google Sheets thành công');
+          }
+        })
+        .catch(() => {});
     } else {
       const err = await res.json();
       alert(err.error);
@@ -210,18 +229,18 @@ export default function EmployeeList({ role }: { role: Role }) {
                   <td className="p-4 text-slate-600">{emp.role}</td>
                   <td className="p-4 text-slate-600">{emp.phone}</td>
                   <td className="p-4 text-slate-600">
-                    {emp.joined_date ? (
+                    {formatDateDisplay(emp.start_date || emp.joined_date) ? (
                       <span className="text-indigo-600 font-medium">
-                        {new Date(emp.joined_date).toLocaleDateString('vi-VN')}
+                        {formatDateDisplay(emp.start_date || emp.joined_date)}
                       </span>
                     ) : (
                       <span className="text-slate-400 italic">Chưa cập nhật</span>
                     )}
                   </td>
                   <td className="p-4 text-slate-600">
-                    {emp.resigned_date ? (
+                    {formatDateDisplay(emp.end_date || emp.resigned_date) ? (
                       <span className="text-red-600 font-medium">
-                        {new Date(emp.resigned_date).toLocaleDateString('vi-VN')}
+                        {formatDateDisplay(emp.end_date || emp.resigned_date)}
                       </span>
                     ) : (
                       <span className="text-slate-400 italic">Đang làm việc</span>
@@ -277,14 +296,14 @@ export default function EmployeeList({ role }: { role: Role }) {
                 <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">{emp.department}</span>
                 <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.role}</span>
                 {emp.phone && <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.phone}</span>}
-                {emp.joined_date && (
+                {(emp.start_date || emp.joined_date) && (
                   <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">
-                    Bắt đầu: {new Date(emp.joined_date).toLocaleDateString('vi-VN')}
+                    Bắt đầu: {formatDateDisplay(emp.start_date || emp.joined_date)}
                   </span>
                 )}
-                {emp.resigned_date && (
+                {(emp.end_date || emp.resigned_date) && (
                   <span className="bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">
-                    Nghỉ việc: {new Date(emp.resigned_date).toLocaleDateString('vi-VN')}
+                    Nghỉ việc: {formatDateDisplay(emp.end_date || emp.resigned_date)}
                   </span>
                 )}
               </div>
