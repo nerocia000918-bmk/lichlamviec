@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Save, AlertCircle, CheckCircle2, RefreshCw, Bell, BellOff, Lock } from 'lucide-react';
+import { Save, AlertCircle, CheckCircle2, RefreshCw, Bell, BellOff, Lock, UploadCloud, Copy, Check, FileCode, ChevronDown, ChevronUp } from 'lucide-react';
 import { Role } from '../types';
+import { APPS_SCRIPT_CODE } from '../appsScriptCode';
 import clsx from 'clsx';
 
 export default function Settings({ 
@@ -18,6 +19,9 @@ export default function Settings({
   const [tlLockHours, setTlLockHours] = useState('24');
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [syncUpStatus, setSyncUpStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [showCodePreview, setShowCodePreview] = useState(false);
   
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,6 +47,16 @@ export default function Settings({
         .then(data => setShifts(data));
     }
   }, [role]);
+
+  const handleCopyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 3000);
+    } catch (e) {
+      console.error('Failed to copy:', e);
+    }
+  };
 
   const handleSaveShift = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,11 +125,30 @@ export default function Settings({
         setTimeout(() => setSyncStatus('idle'), 3000);
       } else {
         setSyncStatus('error');
-        alert(`Lỗi đồng bộ: ${data.error || 'Không xác định'}`);
+        alert(`Lỗi đồng bộ: ${data.error || 'Không xác định'}${data.details ? '\n\nChi tiết phản hồi: ' + data.details : ''}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       setSyncStatus('error');
-      alert('Lỗi kết nối khi đồng bộ dữ liệu.');
+      alert('Lỗi kết nối khi đồng bộ dữ liệu: ' + err.message);
+    }
+  };
+
+  const handleSyncToSheets = async () => {
+    setSyncUpStatus('syncing');
+    try {
+      const res = await fetch('/api/sync-to-sheets', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSyncUpStatus('success');
+        alert('Đồng bộ lên Google Sheets thành công! Toàn bộ danh sách nhân viên và cột ngày bắt đầu (start_date), ngày nghỉ việc (end_date) đã được cập nhật vào Sheet.');
+        setTimeout(() => setSyncUpStatus('idle'), 3000);
+      } else {
+        setSyncUpStatus('error');
+        alert(`Lỗi khi đẩy dữ liệu lên Sheet: ${data.error || 'Vui lòng kiểm tra lại Web App URL hoặc quyền truy cập'}${data.details ? '\n\nChi tiết: ' + data.details : ''}`);
+      }
+    } catch (err: any) {
+      setSyncUpStatus('error');
+      alert('Lỗi kết nối khi đồng bộ lên Sheet: ' + err.message);
     }
   };
 
@@ -245,21 +278,33 @@ export default function Settings({
       {role === 'Admin' && (
         <>
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-            <div className="flex justify-between items-start mb-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
               <div>
-                <h2 className="text-xl font-bold text-slate-800 mb-2">Kết nối Google Sheets</h2>
+                <h2 className="text-xl font-bold text-slate-800 mb-1">Kết nối Google Sheets</h2>
                 <p className="text-sm text-slate-500">
-                  Dán đường link Web App URL từ Google Apps Script vào đây để đồng bộ dữ liệu tự động.
+                  Tự động đồng bộ 2 chiều dữ liệu nhân viên, lịch làm việc và bảo vệ các cột start_date, end_date.
                 </p>
               </div>
-              <button 
-                onClick={handleSync}
-                disabled={syncStatus === 'syncing' || !url}
-                className="flex items-center gap-2 bg-slate-100 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={clsx("w-4 h-4", syncStatus === 'syncing' && "animate-spin")} />
-                {syncStatus === 'syncing' ? 'Đang tải...' : 'Tải dữ liệu từ Sheet'}
-              </button>
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                <button 
+                  onClick={handleSync}
+                  disabled={syncStatus === 'syncing' || !url}
+                  className="flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
+                  title="Tải toàn bộ dữ liệu từ Google Sheet về ứng dụng"
+                >
+                  <RefreshCw className={clsx("w-4 h-4", syncStatus === 'syncing' && "animate-spin")} />
+                  {syncStatus === 'syncing' ? 'Đang tải...' : 'Tải từ Sheet'}
+                </button>
+                <button 
+                  onClick={handleSyncToSheets}
+                  disabled={syncUpStatus === 'syncing' || !url}
+                  className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 shadow-sm flex-1 sm:flex-initial"
+                  title="Đẩy dữ liệu và ngày làm việc mới nhất từ ứng dụng lên Google Sheet"
+                >
+                  <UploadCloud className={clsx("w-4 h-4", syncUpStatus === 'syncing' && "animate-pulse")} />
+                  {syncUpStatus === 'syncing' ? 'Đang đồng bộ...' : 'Đồng bộ lên Sheet'}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-4">
@@ -274,17 +319,19 @@ export default function Settings({
                 />
               </div>
 
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-2">
-                  {status === 'success' && <span className="text-green-600 flex items-center gap-1 text-sm font-medium"><CheckCircle2 className="w-4 h-4" /> Đã lưu thành công!</span>}
-                  {status === 'error' && <span className="text-red-600 flex items-center gap-1 text-sm font-medium"><AlertCircle className="w-4 h-4" /> Có lỗi xảy ra khi lưu.</span>}
-                  {syncStatus === 'success' && <span className="text-green-600 flex items-center gap-1 text-sm font-medium"><CheckCircle2 className="w-4 h-4" /> Đồng bộ dữ liệu thành công!</span>}
-                  {syncStatus === 'error' && <span className="text-red-600 flex items-center gap-1 text-sm font-medium"><AlertCircle className="w-4 h-4" /> Lỗi khi tải dữ liệu từ Sheet.</span>}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  {status === 'success' && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã lưu thành công!</span>}
+                  {status === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Có lỗi xảy ra khi lưu.</span>}
+                  {syncStatus === 'success' && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã tải dữ liệu từ Sheet!</span>}
+                  {syncStatus === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Lỗi khi tải từ Sheet.</span>}
+                  {syncUpStatus === 'success' && <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã đồng bộ lên Sheet thành công!</span>}
+                  {syncUpStatus === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Lỗi khi đẩy lên Sheet.</span>}
                 </div>
                 <button 
                   onClick={handleSave}
                   disabled={status === 'saving'}
-                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50 ml-auto"
                 >
                   <Save className="w-4 h-4" />
                   {status === 'saving' ? 'Đang lưu...' : 'Lưu cài đặt'}
@@ -385,18 +432,65 @@ export default function Settings({
             </div>
           </div>
 
-          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
-            <h3 className="font-bold text-slate-800 mb-4">Hướng dẫn lấy link Web App URL</h3>
-            <ol className="list-decimal list-inside space-y-3 text-sm text-slate-600">
-              <li>Mở file Google Sheets của bạn.</li>
-              <li>Tạo 6 trang tính: <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">Nhan_Vien</code>, <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">DanhMuc_Ca</code>, <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">Lich_Lam_Viec</code>, <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">Thang_Chot</code>, <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">Thong_Bao</code>, <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">DanhMuc_NhiemVu</code>.</li>
-              <li>Vào <strong>Tiện ích mở rộng</strong> &gt; <strong>Apps Script</strong>.</li>
-              <li>Copy toàn bộ code từ file <code className="bg-white px-1.5 py-0.5 rounded border border-slate-200">AppsScript.js</code> dán vào và bấm Lưu.</li>
-              <li>Bấm <strong>Triển khai (Deploy)</strong> &gt; <strong>Triển khai mới (New deployment)</strong>.</li>
-              <li>Chọn loại: <strong>Ứng dụng web (Web App)</strong>.</li>
-              <li>Quan trọng: Chọn Thực thi dưới tư cách <strong>Tôi (Me)</strong> và Quyền truy cập <strong>Bất kỳ ai (Anyone)</strong>.</li>
-              <li>Bấm Triển khai, cấp quyền và copy đường link dán vào ô bên trên.</li>
-            </ol>
+          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-800 text-lg">Mã Google Apps Script (Bản bảo vệ start_date & end_date)</h3>
+                  <span className="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-bold">Chống mất cột & Chống xóa trắng</span>
+                </div>
+                <p className="text-sm text-slate-600 mt-1">
+                  Đã khắc phục hoàn toàn lỗi mất cột khi sang ngày mới: Hệ thống tuyệt đối <b>không xóa cột</b> và <b>không xóa trắng</b> dữ liệu ngày đã có trong Sheet.
+                </p>
+              </div>
+              <button 
+                onClick={handleCopyCode}
+                className={clsx(
+                  "flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm shrink-0",
+                  copiedCode ? "bg-green-600 text-white" : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                )}
+              >
+                {copiedCode ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copiedCode ? 'Đã sao chép mã!' : 'Sao chép mã Apps Script'}
+              </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl text-amber-900 text-sm space-y-2">
+              <div className="font-bold flex items-center gap-2 text-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600" />
+                Lưu ý cực kỳ quan trọng để cập nhật thành công:
+              </div>
+              <p>
+                Để các thay đổi ngày <b>start_date</b> và <b>end_date</b> bạn chỉnh sửa trên app được cập nhật vào Sheet mà không bị xóa mất cột:
+              </p>
+              <ol className="list-decimal list-inside space-y-1 text-xs text-amber-950 ml-1">
+                <li>Bấm nút <b>"Sao chép mã Apps Script"</b> ở trên.</li>
+                <li>Mở file Google Sheet của bạn &gt; Vào menu <b>Tiện ích mở rộng</b> &gt; <b>Apps Script</b>.</li>
+                <li>Xóa toàn bộ mã cũ và <b>Dán (Paste)</b> mã vừa sao chép vào. Bấm <b>Lưu (Ctrl + S)</b>.</li>
+                <li>Bấm <b>Triển khai (Deploy)</b> &gt; <b>Quản lý công tác triển khai (Manage deployments)</b> &gt; Bấm biểu tượng <b>Cây bút (Chỉnh sửa)</b>.</li>
+                <li>Tại mục Phiên bản chọn <b>"Phiên bản mới" (New version)</b> &gt; Bấm <b>Triển khai</b>.</li>
+                <li>Quay lại ứng dụng này, bấm nút <b>"Đồng bộ lên Sheet"</b> màu xanh lá ở trên để cập nhật dữ liệu ngay lập tức.</li>
+              </ol>
+            </div>
+
+            <div>
+              <button 
+                onClick={() => setShowCodePreview(!showCodePreview)}
+                className="flex items-center gap-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+              >
+                <FileCode className="w-4 h-4" />
+                {showCodePreview ? 'Ẩn xem trước mã nguồn Apps Script' : 'Xem trước mã nguồn Apps Script'}
+                {showCodePreview ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+
+              {showCodePreview && (
+                <div className="mt-3 relative">
+                  <pre className="bg-slate-900 text-slate-100 p-4 rounded-xl text-xs font-mono max-h-72 overflow-y-auto leading-relaxed border border-slate-800">
+                    {APPS_SCRIPT_CODE}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}

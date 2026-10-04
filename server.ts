@@ -38,60 +38,101 @@ function getGoogleSheetsUrl() {
 let syncTimeout: NodeJS.Timeout | null = null;
 let io: Server | null = null;
 
-function triggerSync() {
+async function pushToGoogleSheets() {
+  const url = getGoogleSheetsUrl();
+  if (!url) return { success: false, error: 'Chưa cấu hình URL Google Sheets' };
+  
+  try {
+    const rawEmployees = db.prepare('SELECT * FROM employees').all() as any[];
+    const employees = rawEmployees.map(e => {
+      let joined = e.joined_date;
+      let resigned = e.resigned_date;
+      
+      // Fallback to persistence table if dates are empty
+      if (!joined || !resigned) {
+        const p = db.prepare('SELECT joined_date, resigned_date FROM employee_date_persistence WHERE code = ? OR (name = ? AND name != "")').get(e.code, e.name) as any;
+        if (p) {
+          if (!joined && p.joined_date) joined = p.joined_date;
+          if (!resigned && p.resigned_date) resigned = p.resigned_date;
+        }
+      }
+      
+      const joinedNorm = joined ? normalizeDate(joined) : '';
+      const resignedNorm = resigned ? normalizeDate(resigned) : '';
+
+      return {
+        ...e,
+        joined_date: joinedNorm,
+        resigned_date: resignedNorm,
+        start_date: joinedNorm,
+        end_date: resignedNorm,
+        'Ngày vào làm': joinedNorm,
+        'Ngày nghỉ việc': resignedNorm
+      };
+    });
+
+    const shifts = db.prepare('SELECT * FROM shifts').all();
+    const schedules = db.prepare('SELECT * FROM schedules').all();
+    const lockedMonths = db.prepare('SELECT * FROM locked_months').all();
+    const announcements = db.prepare('SELECT * FROM announcements').all();
+    const announcementViews = db.prepare('SELECT * FROM announcement_views').all();
+    const leaveRequests = db.prepare('SELECT * FROM leave_requests').all();
+    const tasks = db.prepare('SELECT * FROM tasks').all();
+    const assignedTasks = db.prepare('SELECT * FROM assigned_tasks').all();
+    const taskAssignments = db.prepare('SELECT * FROM task_assignments').all();
+
+    console.log(`[pushToGoogleSheets] Pushing data to Sheets (${employees.length} employees, ${schedules.length} schedules)...`);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'sync_all',
+        data: { employees, shifts, schedules, lockedMonths, announcements, announcementViews, leaveRequests, tasks, assignedTasks, taskAssignments }
+      }),
+      redirect: 'follow'
+    });
+    
+    const text = await res.text();
+    try {
+      const result = JSON.parse(text);
+      if (result.success) {
+        console.log('Synced to Google Sheets successfully');
+      } else {
+        console.error('Google Sheets sync error:', result.error);
+      }
+      return result;
+    } catch (e) {
+      console.error('\n=============================================================');
+      console.error('❌ LỖI ĐỒNG BỘ GOOGLE SHEETS: Phản hồi không phải là JSON hợp lệ.');
+      console.error('Nội dung phản hồi (trích đoạn):', text.substring(0, 200) + '...');
+      console.error('👉 CÁCH KHẮC PHỤC:');
+      console.error('1. Mở lại Google Apps Script.');
+      console.error('2. Bấm "Triển khai" (Deploy) -> "Quản lý công tác triển khai" (Manage deployments).');
+      console.error('3. Bấm biểu tượng cây bút (Chỉnh sửa) ở góc phải.');
+      console.error('4. Đảm bảo 2 cài đặt sau CHÍNH XÁC:');
+      console.error('   - Thực thi dưới tư cách (Execute as): CHỌN "Tôi" (Me)');
+      console.error('   - Quyền truy cập (Who has access): CHỌN "Bất kỳ ai" (Anyone)');
+      console.error('5. Bấm "Triển khai" (Deploy) lại và copy link mới (phải có đuôi /exec).');
+      console.error('6. Dán link mới vào mục Cài đặt trong ứng dụng.');
+      console.error('=============================================================\n');
+      return { success: false, error: 'Phản hồi không phải JSON hợp lệ. Hãy kiểm tra bước Triển khai Web App.', details: text.substring(0, 200) };
+    }
+  } catch (err: any) {
+    console.error('Failed to sync to Google Sheets:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+function triggerSync(immediate = false) {
   const url = getGoogleSheetsUrl();
   if (!url) return;
   if (syncTimeout) clearTimeout(syncTimeout);
-  syncTimeout = setTimeout(async () => {
-    try {
-      const employees = db.prepare('SELECT * FROM employees').all();
-      const shifts = db.prepare('SELECT * FROM shifts').all();
-      const schedules = db.prepare('SELECT * FROM schedules').all();
-      const lockedMonths = db.prepare('SELECT * FROM locked_months').all();
-      const announcements = db.prepare('SELECT * FROM announcements').all();
-      const announcementViews = db.prepare('SELECT * FROM announcement_views').all();
-      const leaveRequests = db.prepare('SELECT * FROM leave_requests').all();
-      const tasks = db.prepare('SELECT * FROM tasks').all();
-      const assignedTasks = db.prepare('SELECT * FROM assigned_tasks').all();
-      const taskAssignments = db.prepare('SELECT * FROM task_assignments').all();
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'sync_all',
-          data: { employees, shifts, schedules, lockedMonths, announcements, announcementViews, leaveRequests, tasks, assignedTasks, taskAssignments }
-        }),
-        redirect: 'follow'
-      });
-      
-      const text = await res.text();
-      try {
-        const result = JSON.parse(text);
-        if (result.success) {
-          console.log('Synced to Google Sheets successfully');
-        } else {
-          console.error('Google Sheets sync error:', result.error);
-        }
-      } catch (e) {
-        console.error('\n=============================================================');
-        console.error('❌ LỖI ĐỒNG BỘ GOOGLE SHEETS: Phản hồi không phải là JSON hợp lệ.');
-        console.error('Nội dung phản hồi (trích đoạn):', text.substring(0, 200) + '...');
-        console.error('👉 CÁCH KHẮC PHỤC:');
-        console.error('1. Mở lại Google Apps Script.');
-        console.error('2. Bấm "Triển khai" (Deploy) -> "Quản lý công tác triển khai" (Manage deployments).');
-        console.error('3. Bấm biểu tượng cây bút (Chỉnh sửa) ở góc phải.');
-        console.error('4. Đảm bảo 2 cài đặt sau CHÍNH XÁC:');
-        console.error('   - Thực thi dưới tư cách (Execute as): CHỌN "Tôi" (Me)');
-        console.error('   - Quyền truy cập (Who has access): CHỌN "Bất kỳ ai" (Anyone)');
-        console.error('5. Bấm "Triển khai" (Deploy) lại và copy link mới (phải có đuôi /exec).');
-        console.error('6. Dán link mới vào mục Cài đặt trong ứng dụng.');
-        console.error('=============================================================\n');
-      }
-    } catch (err) {
-      console.error('Failed to sync to Google Sheets:', err);
-    }
-  }, 2000);
+  if (immediate) {
+    pushToGoogleSheets();
+  } else {
+    syncTimeout = setTimeout(pushToGoogleSheets, 1000);
+  }
 }
 
 function normalizeDate(dateStr: any): string {
@@ -186,19 +227,30 @@ async function loadFromGoogleSheets() {
   if (!url) return { success: false, error: 'Chưa cấu hình URL Google Sheets' };
   try {
     console.log('Fetching data from Google Sheets...');
-    const res = await fetch(url);
+    const res = await fetch(url, { redirect: 'follow' });
     const text = await res.text();
 
     let data;
     try {
       data = JSON.parse(text);
     } catch (parseError) {
-      const errorMsg = 'URL trả về không phải dữ liệu JSON hợp lệ. Hãy kiểm tra lại bước Triển khai (Deploy) trong Apps Script.';
+      let errorMsg = 'URL trả về không phải dữ liệu JSON hợp lệ. Hãy kiểm tra lại bước Triển khai (Deploy) trong Apps Script.';
+      
+      if (text.includes('accounts.google.com') || text.includes('Sign in') || text.includes('Đăng nhập')) {
+        errorMsg = 'Lỗi phân quyền: URL yêu cầu đăng nhập tài khoản Google. Trong Apps Script, hãy vào Triển khai > Quản lý công tác triển khai > Cây bút > Chọn "Quyền truy cập: Bất kỳ ai" (Anyone) thay vì "Chỉ mình tôi".';
+      } else if (url.includes('/edit') || text.includes('/edit')) {
+        errorMsg = 'Link bạn dán là link chỉnh sửa (/edit). URL Web App phải kết thúc bằng /exec.';
+      } else if (text.includes('Authorization is required') || text.includes('Script requires authorization')) {
+        errorMsg = 'Script chưa được cấp quyền truy cập Sheet. Trong Apps Script, hãy chạy thử 1 hàm (như createDateColumnsIfMissing) rồi bấm "Xem lại quyền" > "Nâng cao" > "Cho phép".';
+      } else if (text.includes('Moved Temporarily')) {
+        errorMsg = 'Lỗi chuyển hướng Google Apps Script. Vui lòng kiểm tra lại link Web App.';
+      }
+
       console.error('\n=============================================================');
       console.error('❌ LỖI KẾT NỐI GOOGLE SHEETS:', errorMsg);
       console.error('Nội dung phản hồi (trích đoạn):', text.substring(0, 200) + '...');
       console.error('=============================================================\n');
-      return { success: false, error: errorMsg, details: text.substring(0, 100) };
+      return { success: false, error: errorMsg, details: text.substring(0, 150) };
     }
 
     if (data && data.employees) {
@@ -251,8 +303,8 @@ async function loadFromGoogleSheets() {
             if (role === 'Admin' && !password) password = '1234';
             
             // Flexible date field mapping
-            const rawResigned = e.resigned_date || e.resignedDate || e.ngay_nghi_viec || e['Ngày nghỉ việc'] || e['Resigned Date'] || e['resignedDate'];
-            const rawJoined = e.joined_date || e.joinedDate || e.ngay_vao_lam || e.joined_at || e['Ngày vào làm'] || e['Joined Date'] || e['joinedDate'] || e['Ngày vào'];
+            const rawResigned = e.resigned_date || e.resignedDate || e.end_date || e.endDate || e['end_date'] || e['End Date'] || e.ngay_nghi_viec || e['Ngày nghỉ việc'] || e['Resigned Date'] || e['resignedDate'] || e['Ngày nghỉ'] || e['ngay_nghi'];
+            const rawJoined = e.joined_date || e.joinedDate || e.start_date || e.startDate || e['start_date'] || e['Start Date'] || e.ngay_vao_lam || e.joined_at || e['Ngày vào làm'] || e['Ngày bắt đầu'] || e['Joined Date'] || e['joinedDate'] || e['Ngày vào'] || e['ngay_vao'];
             
             let resignedDate = rawResigned ? normalizeDate(rawResigned) : null;
             let joinedDate = rawJoined ? normalizeDate(rawJoined) : null;
@@ -636,20 +688,23 @@ async function startServer() {
   });
 
   app.post('/api/employees', (req, res) => {
-    const { code, name, department, role, phone, resigned_date, joined_date } = req.body;
+    const { code, name, department, role, phone, resigned_date, joined_date, start_date, end_date } = req.body;
+    const finalJoined = (joined_date || start_date) ? normalizeDate(joined_date || start_date) : null;
+    const finalResigned = (resigned_date || end_date) ? normalizeDate(resigned_date || end_date) : null;
+    
     try {
       const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date, joined_date) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(code, name, department, role, phone, resigned_date || null, joined_date || null);
+        .run(code, name, department, role, phone, finalResigned, finalJoined);
       
-      // Save to persistence
-      if (joined_date || resigned_date) {
+      // Save to persistence table
+      if (finalJoined || finalResigned) {
         db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date) VALUES (?, ?, ?, ?)')
-          .run(code, name, joined_date || null, resigned_date || null);
+          .run(code, name, finalJoined, finalResigned);
       }
 
       const newEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(result.lastInsertRowid);
       io.emit('employees:updated');
-      triggerSync();
+      triggerSync(true); // immediate sync to Google Sheets
       res.json(newEmployee);
     } catch (error) {
       res.status(400).json({ error: 'Mã nhân viên đã tồn tại hoặc lỗi dữ liệu' });
@@ -657,20 +712,23 @@ async function startServer() {
   });
 
   app.put('/api/employees/:id', (req, res) => {
-    const { code, name, department, role, phone, resigned_date, joined_date } = req.body;
+    const { code, name, department, role, phone, resigned_date, joined_date, start_date, end_date } = req.body;
+    const finalJoined = (joined_date || start_date) ? normalizeDate(joined_date || start_date) : null;
+    const finalResigned = (resigned_date || end_date) ? normalizeDate(resigned_date || end_date) : null;
+
     try {
       db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ?, joined_date = ? WHERE id = ?')
-        .run(code, name, department, role, phone, resigned_date || null, joined_date || null, req.params.id);
+        .run(code, name, department, role, phone, finalResigned, finalJoined, req.params.id);
       
-      // Save to persistence
-      if (joined_date || resigned_date) {
+      // Save to persistence table
+      if (finalJoined || finalResigned) {
         db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date) VALUES (?, ?, ?, ?)')
-          .run(code, name, joined_date || null, resigned_date || null);
+          .run(code, name, finalJoined, finalResigned);
       }
 
       io.emit('employees:updated');
       io.emit('schedules:updated');
-      triggerSync();
+      triggerSync(true); // immediate sync to Google Sheets
       res.json({ success: true });
     } catch (error) {
       res.status(400).json({ error: 'Mã nhân viên đã tồn tại hoặc lỗi dữ liệu' });
@@ -955,6 +1013,19 @@ async function startServer() {
       }
     } catch (error: any) {
       res.status(500).json({ success: false, error: 'Lỗi hệ thống: ' + error.message });
+    }
+  });
+
+  app.post('/api/sync-to-sheets', async (req, res) => {
+    try {
+      const result = await pushToGoogleSheets();
+      if (result.success) {
+        res.json(result);
+      } else {
+        res.status(400).json(result);
+      }
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Lỗi đồng bộ lên Google Sheets: ' + error.message });
     }
   });
 

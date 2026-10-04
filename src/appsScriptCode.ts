@@ -1,4 +1,7 @@
-// ==========================================
+// File chứa toàn bộ mã nguồn Google Apps Script chuẩn hóa
+// Tự động tạo cột start_date & end_date nếu thiếu, bảo vệ cột, chống xóa trắng
+
+export const APPS_SCRIPT_CODE = `// ==========================================
 // CẤU HÌNH QUAN TRỌNG (CHỈ NẾU GẶP LỖI)
 // Nếu bạn gặp lỗi "Không tìm thấy Spreadsheet", hãy dán ID của file Sheet vào đây.
 // ID là chuỗi ký tự nằm giữa /d/ và /edit trong đường dẫn trình duyệt của file Sheet.
@@ -27,7 +30,7 @@ var COLUMN_ALIASES = {
 
 function normalizeHeader(h) {
   if (!h) return '';
-  return h.toString().toLowerCase().trim().replace(/[\s_\-]+/g, '');
+  return h.toString().toLowerCase().trim().replace(/[\\s_\\-]+/g, '');
 }
 
 function findColumnIndex(headers, standardCol) {
@@ -272,13 +275,11 @@ function updateEmployeeSheet(ss, sheetName, employees, standardCols) {
         var newVal = '';
         if (isStartDateCol) {
           newVal = emp.start_date || emp.joined_date || emp['Ngày vào làm'] || emp['Ngày bắt đầu'] || '';
-          // CHỐNG XÓA TRẮNG: nếu giá trị mới rỗng nhưng ô cũ đã có ngày -> giữ nguyên ô cũ
           if ((!newVal || newVal === '') && oldVal !== '' && oldVal !== null && oldVal !== undefined) {
             newVal = oldVal;
           }
         } else if (isEndDateCol) {
           newVal = emp.end_date || emp.resigned_date || emp['Ngày nghỉ việc'] || '';
-          // CHỐNG XÓA TRẮNG: nếu giá trị mới rỗng nhưng ô cũ đã có ngày -> giữ nguyên ô cũ
           if ((!newVal || newVal === '') && oldVal !== '' && oldVal !== null && oldVal !== undefined) {
             newVal = oldVal;
           }
@@ -486,7 +487,6 @@ function getSheetData(ss, sheetName, columns) {
       }
     }
     
-    // Đồng bộ chéo các trường bí danh quan trọng
     if (obj.start_date && !obj.joined_date) obj.joined_date = obj.start_date;
     if (obj.joined_date && !obj.start_date) obj.start_date = obj.joined_date;
     
@@ -497,3 +497,4 @@ function getSheetData(ss, sheetName, columns) {
   }
   return result;
 }
+`;

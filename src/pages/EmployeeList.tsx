@@ -12,6 +12,8 @@ interface Employee {
   phone: string;
   resigned_date?: string | null;
   joined_date?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
 }
 
 const DEPARTMENTS = ['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho'];
@@ -22,7 +24,17 @@ export default function EmployeeList({ role }: { role: Role }) {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [formData, setFormData] = useState({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '', joined_date: '' });
+  const [formData, setFormData] = useState({ 
+    code: '', 
+    name: '', 
+    department: 'Bán hàng', 
+    role: 'Nhân viên', 
+    phone: '', 
+    resigned_date: '', 
+    joined_date: '',
+    start_date: '',
+    end_date: ''
+  });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
 
   const fetchEmployees = async () => {
@@ -47,20 +59,34 @@ export default function EmployeeList({ role }: { role: Role }) {
 
   const openAddForm = () => {
     setEditingId(null);
-    setFormData({ code: '', name: '', department: 'Bán hàng', role: 'Nhân viên', phone: '', resigned_date: '', joined_date: '' });
+    setFormData({ 
+      code: '', 
+      name: '', 
+      department: 'Bán hàng', 
+      role: 'Nhân viên', 
+      phone: '', 
+      resigned_date: '', 
+      joined_date: '',
+      start_date: '',
+      end_date: ''
+    });
     setShowForm(true);
   };
 
   const openEditForm = (emp: Employee) => {
     setEditingId(emp.id);
+    const startVal = emp.start_date || emp.joined_date || '';
+    const endVal = emp.end_date || emp.resigned_date || '';
     setFormData({ 
       code: emp.code, 
       name: emp.name, 
       department: emp.department, 
       role: emp.role, 
-      phone: emp.phone,
-      resigned_date: emp.resigned_date || '',
-      joined_date: emp.joined_date || ''
+      phone: emp.phone || '',
+      resigned_date: endVal,
+      joined_date: startVal,
+      start_date: startVal,
+      end_date: endVal
     });
     setShowForm(true);
   };
@@ -86,11 +112,18 @@ export default function EmployeeList({ role }: { role: Role }) {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
+      body: JSON.stringify({
+        ...formData,
+        start_date: formData.joined_date,
+        end_date: formData.resigned_date,
+        joined_date: formData.joined_date,
+        resigned_date: formData.resigned_date
+      })
     });
     
     if (res.ok) {
       setShowForm(false);
+      fetchEmployees();
     } else {
       const err = await res.json();
       alert(err.error);
@@ -298,14 +331,24 @@ export default function EmployeeList({ role }: { role: Role }) {
                 <input type="text" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày bắt đầu làm việc</label>
-                <input type="date" value={formData.joined_date} onChange={e => setFormData({...formData, joined_date: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
-                <p className="text-xs text-slate-500 mt-1 italic">Nhân viên sẽ chỉ xuất hiện trong lịch từ tuần có ngày này trở đi.</p>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày bắt đầu làm việc (start_date)</label>
+                <input 
+                  type="date" 
+                  value={formData.joined_date || formData.start_date || ''} 
+                  onChange={e => setFormData({...formData, joined_date: e.target.value, start_date: e.target.value})} 
+                  className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                />
+                <p className="text-xs text-slate-500 mt-1 italic">Tự động đồng bộ vào cột start_date / joined_date trên Google Sheets.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày nghỉ việc (nếu có)</label>
-                <input type="date" value={formData.resigned_date} onChange={e => setFormData({...formData, resigned_date: e.target.value})} className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" />
-                <p className="text-xs text-slate-500 mt-1 italic">Sau ngày này, nhân viên sẽ không thể đăng nhập và không xuất hiện trong lịch tuần mới.</p>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ngày nghỉ việc (end_date)</label>
+                <input 
+                  type="date" 
+                  value={formData.resigned_date || formData.end_date || ''} 
+                  onChange={e => setFormData({...formData, resigned_date: e.target.value, end_date: e.target.value})} 
+                  className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                />
+                <p className="text-xs text-slate-500 mt-1 italic">Tự động đồng bộ vào cột end_date / resigned_date trên Google Sheets.</p>
               </div>
               
               <div className="pt-4 flex justify-end gap-3">
