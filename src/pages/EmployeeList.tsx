@@ -124,6 +124,7 @@ export default function EmployeeList({ role }: { role: Role }) {
     if (res.ok) {
       setShowForm(false);
       fetchEmployees();
+      fetch('/api/sync-to-sheets', { method: 'POST' }).catch(() => {});
     } else {
       const err = await res.json();
       alert(err.error);

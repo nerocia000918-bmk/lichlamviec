@@ -44,21 +44,6 @@ function findColumnIndex(headers, standardCol) {
   return -1;
 }
 
-function findAllColumnIndices(headers, standardCol) {
-  var stdNorm = normalizeHeader(standardCol);
-  var aliases = COLUMN_ALIASES[standardCol] || [standardCol];
-  var normalizedAliases = aliases.map(normalizeHeader);
-  var indices = [];
-  
-  for (var i = 0; i < headers.length; i++) {
-    var h = normalizeHeader(headers[i]);
-    if (h === stdNorm || normalizedAliases.indexOf(h) !== -1) {
-      indices.push(i);
-    }
-  }
-  return indices;
-}
-
 function getSheetByNameCaseInsensitive(ss, name) {
   if (!ss) {
     throw new Error("Không tìm thấy Spreadsheet. Nếu bạn đang chạy thử trong Apps Script Editor, hãy đảm bảo chọn đúng hàm doGet hoặc doPost. Nếu vẫn lỗi, hãy điền SPREADSHEET_ID ở đầu mã nguồn.");
@@ -93,8 +78,10 @@ function getSpreadsheet() {
 }
 
 /**
- * Tự động kiểm tra và thêm 2 cột start_date và end_date vào dòng 1 nếu trên Sheet chưa có.
- * Giúp người dùng không cần tạo cột bằng tay, hệ thống sẽ tự động thêm và giữ nguyên.
+ * ĐẢM BẢO CHẮC CHẮN CÓ 2 CỘT start_date VÀ end_date TRÊN DÒNG 1.
+ * - Nếu Sheet có cột joined_date -> tự động đổi tên thành start_date hoặc thêm start_date.
+ * - Nếu Sheet có cột resigned_date -> tự động đổi tên thành end_date hoặc thêm end_date.
+ * - Nếu chưa có bất kỳ cột nào -> tự động thêm start_date và end_date vào cuối dòng 1.
  */
 function ensureEmployeeDateColumns(sheet) {
   if (!sheet) return [];
@@ -112,37 +99,58 @@ function ensureEmployeeDateColumns(sheet) {
     return headers;
   }
   
-  // Kiểm tra cột start_date
-  var startIdx = findColumnIndex(headers, 'start_date');
-  if (startIdx === -1) {
-    var newCol1 = headers.length + 1;
-    sheet.getRange(1, newCol1).setValue('start_date');
-    headers.push('start_date');
+  var hasStartDate = false;
+  var hasEndDate = false;
+  var joinedDateIdx = -1;
+  var resignedDateIdx = -1;
+  
+  for (var i = 0; i < headers.length; i++) {
+    var hNorm = normalizeHeader(headers[i]);
+    if (hNorm === 'startdate' || hNorm === 'start_date') hasStartDate = true;
+    if (hNorm === 'enddate' || hNorm === 'end_date') hasEndDate = true;
+    if (hNorm === 'joineddate' || hNorm === 'joined_date') joinedDateIdx = i;
+    if (hNorm === 'resigneddate' || hNorm === 'resigned_date') resignedDateIdx = i;
   }
   
-  // Kiểm tra cột end_date
-  var endIdx = findColumnIndex(headers, 'end_date');
-  if (endIdx === -1) {
-    var newCol2 = headers.length + 1;
-    sheet.getRange(1, newCol2).setValue('end_date');
-    headers.push('end_date');
+  // Đảm bảo có cột start_date
+  if (!hasStartDate) {
+    if (joinedDateIdx !== -1) {
+      sheet.getRange(1, joinedDateIdx + 1).setValue('start_date');
+      headers[joinedDateIdx] = 'start_date';
+    } else {
+      var col1 = sheet.getLastColumn() + 1;
+      sheet.getRange(1, col1).setValue('start_date');
+      headers.push('start_date');
+    }
+  }
+  
+  // Đảm bảo có cột end_date
+  if (!hasEndDate) {
+    if (resignedDateIdx !== -1) {
+      sheet.getRange(1, resignedDateIdx + 1).setValue('end_date');
+      headers[resignedDateIdx] = 'end_date';
+    } else {
+      var col2 = sheet.getLastColumn() + 1;
+      sheet.getRange(1, col2).setValue('end_date');
+      headers.push('end_date');
+    }
   }
   
   return headers;
 }
 
 /**
- * Hàm thủ công: bấm "Chạy" hàm này trong Apps Script Editor để tạo ngay 2 cột nếu chưa có.
+ * HÀM TIỆN ÍCH: Bấm nút "Chạy" (Run) hàm này trong trình soạn thảo Apps Script
+ * để kiểm tra và tự động tạo 2 cột start_date & end_date ngay trong Google Sheet!
  */
-function createDateColumnsIfMissing() {
+function taoVaCapNhatCotNgay() {
   var ss = getSpreadsheet();
-  if (!ss) throw new Error("Không thể kết nối với Spreadsheet. Hãy điền SPREADSHEET_ID.");
+  if (!ss) throw new Error("Không thể kết nối với Spreadsheet. Hãy điền SPREADSHEET_ID ở dòng 5 nếu đang chạy độc lập.");
   var sheet = getSheetByNameCaseInsensitive(ss, 'Nhan_Vien');
-  if (!sheet) {
-    sheet = ss.insertSheet('Nhan_Vien');
-  }
+  if (!sheet) sheet = ss.insertSheet('Nhan_Vien');
+  
   var headers = ensureEmployeeDateColumns(sheet);
-  Logger.log("Các cột hiện có trong Nhan_Vien: " + JSON.stringify(headers));
+  Logger.log("✅ Đã kiểm tra tiêu đề các cột: " + JSON.stringify(headers));
 }
 
 function onOpen() {
@@ -154,7 +162,7 @@ function onOpen() {
       
       var ui = SpreadsheetApp.getUi();
       ui.createMenu('Lịch Làm Việc')
-        .addItem('Tự động tạo cột start_date & end_date', 'createDateColumnsIfMissing')
+        .addItem('Tự động tạo cột start_date & end_date', 'taoVaCapNhatCotNgay')
         .addToUi();
     }
   } catch (e) {}
@@ -170,9 +178,7 @@ function doPost(e) {
       var data = params.data;
       
       // Đồng bộ bảo vệ cột và tự động sinh cột ngày cho Nhan_Vien
-      updateEmployeeSheet(ss, 'Nhan_Vien', data.employees, [
-        'id', 'code', 'name', 'department', 'role', 'phone', 'password', 'start_date', 'end_date', 'resigned_date', 'joined_date'
-      ]);
+      updateEmployeeSheet(ss, 'Nhan_Vien', data.employees);
       
       // Đồng bộ an toàn các bảng khác (KHÔNG BAO GIỜ xóa cột hay xóa header dòng 1)
       updateSheetSafe(ss, 'DanhMuc_Ca', data.shifts, ['id', 'name', 'department', 'start_time', 'end_time', 'color', 'text_color']);
@@ -200,11 +206,8 @@ function doPost(e) {
 
 /**
  * Cập nhật bảng Nhân Viên có cơ chế TỰ ĐỘNG TẠO CỘT, BẢO VỆ CỘT và CHỐNG XÓA TRẮNG.
- * - Tự động tạo thêm 2 cột start_date và end_date nếu trên Sheet chưa có.
- * - Tuyệt đối KHÔNG xóa cột hay xóa toàn bộ sheet (không dùng sheet.clear()).
- * - Nếu ô dữ liệu trong Sheet đã có ngày mà dữ liệu gửi lên bị trống: GIỮ NGUYÊN GIÁ TRỊ CŨ.
  */
-function updateEmployeeSheet(ss, sheetName, employees, standardCols) {
+function updateEmployeeSheet(ss, sheetName, employees) {
   var sheet = getSheetByNameCaseInsensitive(ss, sheetName);
   if (!sheet) {
     sheet = ss.insertSheet(sheetName);
@@ -237,9 +240,18 @@ function updateEmployeeSheet(ss, sheetName, employees, standardCols) {
     if (iVal) existingMap['id:' + iVal] = row;
   }
   
-  // Tìm các cột ngày trong headers
-  var startDateIndices = findAllColumnIndices(headers, 'start_date');
-  var endDateIndices = findAllColumnIndices(headers, 'end_date');
+  // Xác định vị trí các cột ngày trong headers
+  var startColIndices = [];
+  var endColIndices = [];
+  for (var h = 0; h < headers.length; h++) {
+    var hNorm = normalizeHeader(headers[h]);
+    if (hNorm === 'startdate' || hNorm === 'joineddate' || hNorm === 'ngayvaolam' || hNorm === 'ngaybatdau' || hNorm === 'ngayvao') {
+      startColIndices.push(h);
+    }
+    if (hNorm === 'enddate' || hNorm === 'resigneddate' || hNorm === 'ngaynghiviec' || hNorm === 'ngaynghi') {
+      endColIndices.push(h);
+    }
+  }
   
   // Xây dựng danh sách dòng mới
   var newRows = [];
@@ -266,19 +278,18 @@ function updateEmployeeSheet(ss, sheetName, employees, standardCols) {
         var hNorm = normalizeHeader(headers[c]);
         var oldVal = oldRow ? oldRow[c] : '';
         
-        var isStartDateCol = (startDateIndices.indexOf(c) !== -1);
-        var isEndDateCol = (endDateIndices.indexOf(c) !== -1);
+        var isStartDate = (startColIndices.indexOf(c) !== -1);
+        var isEndDate = (endColIndices.indexOf(c) !== -1);
         
         var newVal = '';
-        if (isStartDateCol) {
+        if (isStartDate) {
           newVal = emp.start_date || emp.joined_date || emp['Ngày vào làm'] || emp['Ngày bắt đầu'] || '';
-          // CHỐNG XÓA TRẮNG: nếu giá trị mới rỗng nhưng ô cũ đã có ngày -> giữ nguyên ô cũ
+          // Nếu giá trị gửi lên rỗng nhưng ô cũ trong sheet đã có ngày -> giữ nguyên ô cũ
           if ((!newVal || newVal === '') && oldVal !== '' && oldVal !== null && oldVal !== undefined) {
             newVal = oldVal;
           }
-        } else if (isEndDateCol) {
+        } else if (isEndDate) {
           newVal = emp.end_date || emp.resigned_date || emp['Ngày nghỉ việc'] || '';
-          // CHỐNG XÓA TRẮNG: nếu giá trị mới rỗng nhưng ô cũ đã có ngày -> giữ nguyên ô cũ
           if ((!newVal || newVal === '') && oldVal !== '' && oldVal !== null && oldVal !== undefined) {
             newVal = oldVal;
           }
@@ -317,7 +328,7 @@ function updateEmployeeSheet(ss, sheetName, employees, standardCols) {
     }
   }
   
-  // Ghi đè phần dữ liệu từ dòng 2 (TUYỆT ĐỐI KHÔNG XÓA DÒNG 1 HEADER VÀ KHÔNG XÓA CỘT)
+  // Ghi đè phần dữ liệu từ dòng 2 (TUYỆT ĐỐI KHÔNG XÓA DÒNG 1 VÀ KHÔNG XÓA CỘT)
   if (newRows.length > 0) {
     if (lastRow > 1 && lastRow - 1 > newRows.length) {
       sheet.getRange(2 + newRows.length, 1, lastRow - 1 - newRows.length, headers.length).clearContent();
@@ -329,8 +340,7 @@ function updateEmployeeSheet(ss, sheetName, employees, standardCols) {
 }
 
 /**
- * Cập nhật dữ liệu an toàn cho các bảng khác (DanhMuc_Ca, Lich_Lam_Viec, v.v.).
- * Tuyệt đối KHÔNG xóa sheet, KHÔNG xóa cột hay xóa header. Chỉ ghi đè từ dòng 2.
+ * Cập nhật dữ liệu an toàn cho các bảng khác.
  */
 function updateSheetSafe(ss, sheetName, items, columns) {
   var sheet = getSheetByNameCaseInsensitive(ss, sheetName);
@@ -412,7 +422,6 @@ function doGet(e) {
     var ss = getSpreadsheet();
     if (!ss) throw new Error("Không thể kết nối với Google Sheet. Hãy mở script từ menu 'Tiện ích mở rộng' trong file Sheet.");
     
-    // Tự động kiểm tra và thêm 2 cột start_date và end_date nếu chưa có (bọc try-catch an toàn)
     try {
       var empSheet = getSheetByNameCaseInsensitive(ss, 'Nhan_Vien');
       if (empSheet) ensureEmployeeDateColumns(empSheet);
@@ -486,7 +495,6 @@ function getSheetData(ss, sheetName, columns) {
       }
     }
     
-    // Đồng bộ chéo các trường bí danh quan trọng
     if (obj.start_date && !obj.joined_date) obj.joined_date = obj.start_date;
     if (obj.joined_date && !obj.start_date) obj.start_date = obj.joined_date;
     
