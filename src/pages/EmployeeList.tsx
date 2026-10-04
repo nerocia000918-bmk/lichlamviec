@@ -152,20 +152,20 @@ export default function EmployeeList({ role }: { role: Role }) {
 
   const filtered = employees
     .filter(e => 
-      e.name.toLowerCase().includes(search.toLowerCase()) || 
-      e.code.toLowerCase().includes(search.toLowerCase()) ||
-      e.department.toLowerCase().includes(search.toLowerCase())
+      (e.name || '').toLowerCase().includes(search.toLowerCase()) || 
+      (e.code || '').toLowerCase().includes(search.toLowerCase()) ||
+      (e.department || '').toLowerCase().includes(search.toLowerCase())
     )
     .sort((a, b) => {
-      const deptA = DEPARTMENTS.indexOf(a.department);
-      const deptB = DEPARTMENTS.indexOf(b.department);
+      const deptA = DEPARTMENTS.indexOf(a.department || '');
+      const deptB = DEPARTMENTS.indexOf(b.department || '');
       if (deptA !== deptB) return (deptA === -1 ? 99 : deptA) - (deptB === -1 ? 99 : deptB);
       
-      const roleA = ROLES.indexOf(a.role);
-      const roleB = ROLES.indexOf(b.role);
+      const roleA = ROLES.indexOf(a.role || '');
+      const roleB = ROLES.indexOf(b.role || '');
       if (roleA !== roleB) return (roleA === -1 ? 99 : roleA) - (roleB === -1 ? 99 : roleB);
       
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
 
   return (

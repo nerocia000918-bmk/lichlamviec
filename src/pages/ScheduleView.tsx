@@ -97,7 +97,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
   const isGuest = !user;
 
   useEffect(() => {
-    if (user) {
+    if (user && user.role !== 'Admin') {
       setViewMode('me');
     } else {
       setViewMode('all');
@@ -201,11 +201,11 @@ export default function ScheduleView({ user }: { user: User | null }) {
           }
         }
 
-        const matchName = e.name.toLowerCase().includes(search.toLowerCase()) || e.code.toLowerCase().includes(search.toLowerCase());
+        const matchName = (e.name || '').toLowerCase().includes(search.toLowerCase()) || (e.code || '').toLowerCase().includes(search.toLowerCase());
         
         let matchView = true;
         if (viewMode === 'me' && user) {
-          matchView = e.id === user.id;
+          matchView = e.id === user.id || e.code === user.code;
         } else if (viewMode === 'dept' && user) {
           matchView = e.department === user.department;
         } else {
@@ -223,12 +223,13 @@ export default function ScheduleView({ user }: { user: User | null }) {
         const roleB = ROLES.indexOf(b.role);
         if (roleA !== roleB) return (roleA === -1 ? 99 : roleA) - (roleB === -1 ? 99 : roleB);
         
-        return a.name.localeCompare(b.name);
+        return (a.name || '').localeCompare(b.name || '');
       });
   }, [employees, search, deptFilter, viewMode, user]);
 
   const getSchedule = (empId: number, dateStr: string) => {
-    return schedules.find(s => s.employee_id === empId && s.date === dateStr);
+    const emp = employees.find(e => e.id === empId);
+    return schedules.find(s => (s.employee_id === empId || (emp && String(s.employee_id) === String(emp.code))) && s.date === dateStr);
   };
 
   const handlePrevWeek = () => setCurrentDate(subWeeks(currentDate, 1));

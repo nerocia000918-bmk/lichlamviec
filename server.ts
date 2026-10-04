@@ -50,7 +50,13 @@ async function pushToGoogleSheets() {
       
       // Fallback to persistence table if dates are empty
       if (!joined || !resigned) {
-        const p = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE code = ? OR (name = ? AND name != "")').get(e.code, e.name) as any;
+        let p: any = null;
+        if (e.code) {
+          p = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE code = ?').get(e.code);
+        }
+        if (!p && e.name) {
+          p = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE name = ?').get(e.name);
+        }
         if (p) {
           if (!joined) joined = p.joined_date || p.start_date;
           if (!resigned) resigned = p.resigned_date || p.end_date;
@@ -354,10 +360,32 @@ async function loadFromGoogleSheets() {
           const insertSchedWithId = db.prepare('INSERT OR REPLACE INTO schedules (id, date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?, ?)');
           const insertSchedNoId = db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)');
           
+          // Build employee code/id map
+          const empMap: Record<string, number> = {};
+          const allEmps = db.prepare('SELECT id, code, name FROM employees').all() as any[];
+          allEmps.forEach(e => {
+            if (e.code) empMap[e.code.toString().trim().toUpperCase()] = e.id;
+            if (e.name) empMap[e.name.toString().trim().toLowerCase()] = e.id;
+            if (e.id) empMap[e.id.toString()] = e.id;
+          });
+
           data.schedules.forEach((s: any) => {
             const normalizedDate = normalizeDate(s.date);
-            if (s.id) insertSchedWithId.run(s.id, normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
-            else insertSchedNoId.run(normalizedDate, s.employee_id, s.shift_id, s.task, s.status, s.note);
+            let empId = s.employee_id;
+            if (empId !== undefined && empId !== null && empId !== '') {
+              const strEmpId = empId.toString().trim();
+              if (empMap[strEmpId.toUpperCase()] !== undefined) {
+                empId = empMap[strEmpId.toUpperCase()];
+              } else if (empMap[strEmpId.toLowerCase()] !== undefined) {
+                empId = empMap[strEmpId.toLowerCase()];
+              } else if (empMap[strEmpId] !== undefined) {
+                empId = empMap[strEmpId];
+              } else if (!isNaN(Number(strEmpId))) {
+                empId = Number(strEmpId);
+              }
+            }
+            if (s.id) insertSchedWithId.run(s.id, normalizedDate, empId, s.shift_id, s.task, s.status, s.note);
+            else insertSchedNoId.run(normalizedDate, empId, s.shift_id, s.task, s.status, s.note);
           });
         }
 
@@ -701,32 +729,47 @@ async function startServer() {
   });
 
   app.get('/api/employees', (req, res) => {
-    const rawEmployees = db.prepare('SELECT * FROM employees').all() as any[];
-    const employees = rawEmployees.map(e => {
-      let joined = e.joined_date || e.start_date;
-      let resigned = e.resigned_date || e.end_date;
-      
-      // Fallback to persistence table if dates are empty
-      if (!joined || !resigned) {
-        const p = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE code = ? OR (name = ? AND name != "")').get(e.code, e.name) as any;
-        if (p) {
-          if (!joined) joined = p.joined_date || p.start_date;
-          if (!resigned) resigned = p.resigned_date || p.end_date;
+    try {
+      const rawEmployees = db.prepare('SELECT * FROM employees').all() as any[];
+      const employees = rawEmployees.map(e => {
+        let joined = e.joined_date || e.start_date;
+        let resigned = e.resigned_date || e.end_date;
+        
+        // Fallback to persistence table if dates are empty
+        if (!joined || !resigned) {
+          let p: any = null;
+          if (e.code) {
+            p = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE code = ?').get(e.code);
+          }
+          if (!p && e.name) {
+            p = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE name = ?').get(e.name);
+          }
+          if (p) {
+            if (!joined) joined = p.joined_date || p.start_date;
+            if (!resigned) resigned = p.resigned_date || p.end_date;
+          }
         }
-      }
-      
-      const joinedNorm = joined ? normalizeDate(joined) : null;
-      const resignedNorm = resigned ? normalizeDate(resigned) : null;
+        
+        const joinedNorm = joined ? normalizeDate(joined) : null;
+        const resignedNorm = resigned ? normalizeDate(resigned) : null;
 
-      return {
-        ...e,
-        joined_date: joinedNorm,
-        resigned_date: resignedNorm,
-        start_date: joinedNorm,
-        end_date: resignedNorm
-      };
-    });
-    res.json(employees);
+        return {
+          ...e,
+          name: e.name || '',
+          code: e.code || '',
+          department: e.department || 'Bán hàng',
+          role: e.role || 'Nhân viên',
+          joined_date: joinedNorm,
+          resigned_date: resignedNorm,
+          start_date: joinedNorm,
+          end_date: resignedNorm
+        };
+      });
+      res.json(employees);
+    } catch (err: any) {
+      console.error('Error fetching employees:', err);
+      res.status(500).json({ error: 'Lỗi tải danh sách nhân viên: ' + err.message });
+    }
   });
 
   app.post('/api/employees', (req, res) => {
@@ -843,7 +886,7 @@ async function startServer() {
     const schedules = db.prepare(`
       SELECT s.*, e.name as employee_name, e.department, sh.name as shift_name, sh.start_time, sh.end_time, sh.color, sh.text_color
       FROM schedules s
-      LEFT JOIN employees e ON s.employee_id = e.id
+      LEFT JOIN employees e ON (s.employee_id = e.id OR s.employee_id = e.code)
       LEFT JOIN shifts sh ON s.shift_id = sh.id
       WHERE s.date >= ? AND s.date <= ?
     `).all(start, end);
