@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 import { Role } from '../types';
-import { Search, UserPlus, Edit2, Trash2 } from 'lucide-react';
+import { Search, UserPlus, Edit2, Trash2, Calendar, Download, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 interface Employee {
   id: number;
@@ -45,13 +45,122 @@ export default function EmployeeList({ role }: { role: Role }) {
     end_date: ''
   });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
+  const [showDatesModal, setShowDatesModal] = useState(false);
+  const [savedDatesStore, setSavedDatesStore] = useState<any[]>([]);
+  const [datesLoading, setDatesLoading] = useState(false);
+  const [restoreStatus, setRestoreStatus] = useState<string | null>(null);
+
+  const fetchSavedDates = async () => {
+    setDatesLoading(true);
+    try {
+      const res = await fetch('/api/employee-dates');
+      if (res.ok) {
+        const data = await res.json();
+        // Merge db records and fileStore
+        const merged: Record<string, any> = {};
+        if (Array.isArray(data.db)) {
+          data.db.forEach((item: any) => {
+            if (item.code) merged[item.code.toUpperCase()] = { ...item };
+          });
+        }
+        if (data.file && typeof data.file === 'object') {
+          Object.entries(data.file).forEach(([code, val]: any) => {
+            const cUpper = code.toUpperCase();
+            merged[cUpper] = {
+              code: cUpper,
+              name: val.name || merged[cUpper]?.name || '',
+              start_date: val.start_date || merged[cUpper]?.start_date || '',
+              end_date: val.end_date || merged[cUpper]?.end_date || ''
+            };
+          });
+        }
+        setSavedDatesStore(Object.values(merged));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDatesLoading(false);
+    }
+  };
+
+  const handleRestoreAllDates = async () => {
+    setDatesLoading(true);
+    setRestoreStatus('Đang khôi phục...');
+    try {
+      // 1. Lấy từ localStorage nếu có
+      const localRaw = localStorage.getItem('EMPLOYEE_DATES_CACHE');
+      const localDates = localRaw ? JSON.parse(localRaw) : {};
+      
+      // 2. Gửi yêu cầu server khôi phục
+      const res = await fetch('/api/employee-dates/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dates: localDates })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRestoreStatus(`Đã khôi phục thành công ${data.restored || 0} nhân viên!`);
+        fetchEmployees();
+        fetchSavedDates();
+        setTimeout(() => setRestoreStatus(null), 4000);
+      } else {
+        setRestoreStatus(`Lỗi: ${data.error}`);
+      }
+    } catch (err: any) {
+      setRestoreStatus(`Lỗi kết nối: ${err.message}`);
+    } finally {
+      setDatesLoading(false);
+    }
+  };
+
+  const handleBackupDatesJson = () => {
+    const dataToExport: Record<string, any> = {};
+    employees.forEach(e => {
+      if (e.code) {
+        dataToExport[e.code.toUpperCase()] = {
+          name: e.name,
+          department: e.department,
+          start_date: e.start_date || e.joined_date || null,
+          end_date: e.end_date || e.resigned_date || null
+        };
+      }
+    });
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = `ngay_nhan_vien_backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const fetchEmployees = async () => {
     try {
       const res = await fetch('/api/employees');
       if (res.ok) {
         const data = await res.json();
-        setEmployees(Array.isArray(data) ? data : []);
+        if (Array.isArray(data)) {
+          setEmployees(data);
+          try {
+            const rawCache = localStorage.getItem('EMPLOYEE_DATES_CACHE');
+            const cache = rawCache ? JSON.parse(rawCache) : {};
+            let updated = false;
+            data.forEach(e => {
+              if (e.code) {
+                const s = e.start_date || e.joined_date;
+                const end = e.end_date || e.resigned_date;
+                if (s || end) {
+                  cache[e.code] = { name: e.name, start_date: s || null, end_date: end || null };
+                  updated = true;
+                }
+              }
+            });
+            if (updated) {
+              localStorage.setItem('EMPLOYEE_DATES_CACHE', JSON.stringify(cache));
+            }
+          } catch (err) {}
+        }
       }
     } catch (error) {
       console.error('Error fetching employees:', error);
@@ -177,13 +286,26 @@ export default function EmployeeList({ role }: { role: Role }) {
         </div>
         
         {role === 'Admin' && (
-          <button 
-            onClick={openAddForm}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Thêm nhân viên</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button 
+              onClick={() => {
+                setShowDatesModal(true);
+                fetchSavedDates();
+              }}
+              className="flex items-center gap-2 bg-slate-100 text-slate-700 hover:bg-slate-200 px-3.5 py-2 rounded-xl transition-colors font-medium text-sm border border-slate-200"
+              title="Quản lý và khôi phục ngày vào làm / ngày nghỉ việc đã lưu vĩnh viễn theo Mã NV"
+            >
+              <Calendar className="w-4 h-4 text-indigo-600" />
+              <span>Kho lưu trữ ngày ({savedDatesStore.length || '...'})</span>
+            </button>
+            <button 
+              onClick={openAddForm}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm font-medium text-sm"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Thêm nhân viên</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -380,6 +502,113 @@ export default function EmployeeList({ role }: { role: Role }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Preserved Dates Storage Modal */}
+      {showDatesModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200 max-h-[90vh] flex flex-col">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">Kho lưu trữ ngày vĩnh viễn theo Mã NV</h3>
+                  <p className="text-xs text-slate-500">
+                    Lưu trữ độc lập start_date & end_date theo Mã nhân viên (Code) — Không sợ bị ghi đè hay mất ngày!
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowDatesModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-2 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-indigo-50/60 p-4 rounded-xl border border-indigo-100 text-sm">
+                <div>
+                  <div className="font-semibold text-indigo-900">Khôi phục nhanh tất cả nhân viên</div>
+                  <div className="text-xs text-indigo-700">
+                    Nạp lại toàn bộ ngày bắt đầu và ngày nghỉ việc từ bộ nhớ vĩnh viễn (Database + File JSON + Trình duyệt).
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRestoreAllDates}
+                    disabled={datesLoading}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={clsx("w-3.5 h-3.5", datesLoading && "animate-spin")} />
+                    <span>Áp dụng khôi phục ngay</span>
+                  </button>
+                  <button
+                    onClick={handleBackupDatesJson}
+                    className="flex items-center gap-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-medium transition-all"
+                    title="Tải file sao lưu JSON về máy tính"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Tải file dự phòng (.json)</span>
+                  </button>
+                </div>
+              </div>
+
+              {restoreStatus && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-sm flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{restoreStatus}</span>
+                </div>
+              )}
+
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-100 text-slate-600 font-semibold uppercase">
+                    <tr>
+                      <th className="p-3">Mã NV</th>
+                      <th className="p-3">Tên nhân viên</th>
+                      <th className="p-3">Ngày bắt đầu (start_date)</th>
+                      <th className="p-3">Ngày nghỉ việc (end_date)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {savedDatesStore.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-slate-400">
+                          Chưa có bản ghi lưu trữ ngày nào. Khi bạn chỉnh sửa ngày của nhân viên, hệ thống sẽ tự động khóa lưu trữ theo Mã NV ở đây!
+                        </td>
+                      </tr>
+                    ) : (
+                      savedDatesStore.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-3 font-mono font-bold text-slate-700">{item.code}</td>
+                          <td className="p-3 font-medium text-slate-800">{item.name || '—'}</td>
+                          <td className="p-3 text-indigo-600 font-medium">
+                            {formatDateDisplay(item.start_date || item.joined_date) || <span className="text-slate-400 font-normal">Chưa có</span>}
+                          </td>
+                          <td className="p-3 text-red-600 font-medium">
+                            {formatDateDisplay(item.end_date || item.resigned_date) || <span className="text-slate-400 font-normal">Chưa có</span>}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setShowDatesModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-medium text-sm transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
       )}

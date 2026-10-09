@@ -746,7 +746,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                                 style={{ backgroundColor: sched.color, color: sched.text_color, opacity: editable ? 1 : 0.8 }}
                               >
                                 <div className="text-sm font-black uppercase tracking-wide whitespace-pre-line leading-tight">
-                                  {sched.shift_name.toUpperCase() === 'OFF KHÔNG LƯƠNG' ? 'OFF\nKHÔNG LƯƠNG' : sched.shift_name}
+                                  {(sched.shift_name || '').toUpperCase() === 'OFF KHÔNG LƯƠNG' ? 'OFF\nKHÔNG LƯƠNG' : (sched.shift_name || 'CHƯA GÁN CA')}
                                 </div>
                                 
                                 {sched.task && sched.task !== 'Không' && (

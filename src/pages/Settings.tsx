@@ -121,7 +121,11 @@ export default function Settings({
       const data = await res.json();
       if (res.ok) {
         setSyncStatus('success');
-        alert(`Đồng bộ thành công! Đã tải ${data.employees} nhân viên và ${data.schedules} lịch làm việc.`);
+        if (data.employees === 0 && data.schedules === 0) {
+          alert(`Đồng bộ hoàn tất: Google Sheets trả về 0 nhân viên và 0 lịch làm việc.\n\nLưu ý quan trọng: Dữ liệu hiện tại trên app được bảo vệ an toàn và KHÔNG BỊ XÓA. Nếu trên Google Sheet của bạn đang có dữ liệu nhưng app đọc về 0, hãy:\n1. Copy mã Apps Script mới nhất ở ô bên dưới và Triển khai (Deploy) phiên bản mới.\n2. Kiểm tra tên tab trong Google Sheet (hỗ trợ cả "Nhân Viên" và "Nhan_Vien", "Lịch Làm Việc" và "Lich_Lam_Viec").`);
+        } else {
+          alert(`Đồng bộ thành công! Đã tải ${data.employees} nhân viên và ${data.schedules} lịch làm việc.`);
+        }
         setTimeout(() => setSyncStatus('idle'), 3000);
       } else {
         setSyncStatus('error');

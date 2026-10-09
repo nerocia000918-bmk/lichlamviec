@@ -4,10 +4,58 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import Database from 'better-sqlite3';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
 dotenv.config();
 
 const db = new Database('schedule.db');
+
+const PERSISTENCE_FILE = './employee_dates_store.json';
+const SETTINGS_FILE = './server_settings.json';
+
+function saveEmployeeDatesToFile(store: Record<string, { name?: string; start_date?: string | null; end_date?: string | null }>) {
+  try {
+    fs.writeFileSync(PERSISTENCE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Could not write employee_dates_store.json:', e);
+  }
+}
+
+function loadEmployeeDatesFromFile(): Record<string, { name?: string; start_date?: string | null; end_date?: string | null }> {
+  try {
+    if (fs.existsSync(PERSISTENCE_FILE)) {
+      const data = fs.readFileSync(PERSISTENCE_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.error('Could not read employee_dates_store.json:', e);
+  }
+  return {};
+}
+
+function saveSettingsToFile(key: string, value: string) {
+  try {
+    let settings: Record<string, string> = {};
+    if (fs.existsSync(SETTINGS_FILE)) {
+      try {
+        settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+      } catch (err) {}
+    }
+    settings[key] = value;
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Could not write server_settings.json:', e);
+  }
+}
+
+function loadSettingsFromFile(): Record<string, string> {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+    }
+  } catch (e) {}
+  return {};
+}
 
 const GOOGLE_SHEETS_URL = process.env.GOOGLE_SHEETS_URL;
 
@@ -19,14 +67,24 @@ function getGoogleSheetsUrl() {
     // If found in DB, use it
     if (row && row.value) return row.value;
     
-    // If not in DB but in ENV, save to DB so UI shows it, and return it
+    // If not in DB but in ENV, save to DB and file, and return it
     if (envUrl) {
       try {
         db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('GOOGLE_SHEETS_URL', envUrl);
+        saveSettingsToFile('GOOGLE_SHEETS_URL', envUrl);
       } catch (e) {
         console.error('Failed to save ENV GOOGLE_SHEETS_URL to DB:', e);
       }
       return envUrl;
+    }
+
+    // Fallback: Check local settings file backup
+    const fileSettings = loadSettingsFromFile();
+    if (fileSettings['GOOGLE_SHEETS_URL']) {
+      try {
+        db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('GOOGLE_SHEETS_URL', fileSettings['GOOGLE_SHEETS_URL']);
+      } catch (e) {}
+      return fileSettings['GOOGLE_SHEETS_URL'];
     }
     
     return undefined;
@@ -187,6 +245,19 @@ function normalizeDate(dateStr: any): string {
   return normalized;
 }
 
+function removeVietnameseTones(str: any): string {
+  if (!str) return '';
+  let s = str.toString().toLowerCase().trim();
+  s = s.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, 'a');
+  s = s.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, 'e');
+  s = s.replace(/ì|í|ị|ỉ|ĩ/g, 'i');
+  s = s.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, 'o');
+  s = s.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, 'u');
+  s = s.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, 'y');
+  s = s.replace(/đ/g, 'd');
+  return s.replace(/[\s_\-]+/g, '');
+}
+
 function reconcileLeaveRequestsWithSchedules() {
   console.log('[Reconciliation] Starting leave request and schedule reconciliation...');
   try {
@@ -249,7 +320,7 @@ async function loadFromGoogleSheets() {
       } else if (url.includes('/edit') || text.includes('/edit')) {
         errorMsg = 'Link bạn dán là link chỉnh sửa (/edit). URL Web App phải kết thúc bằng /exec.';
       } else if (text.includes('Authorization is required') || text.includes('Script requires authorization')) {
-        errorMsg = 'Script chưa được cấp quyền truy cập Sheet. Trong Apps Script, hãy chạy thử 1 hàm (như createDateColumnsIfMissing) rồi bấm "Xem lại quyền" > "Nâng cao" > "Cho phép".';
+        errorMsg = 'Script chưa được cấp quyền truy cập Sheet. Trong Apps Script, hãy chạy thử 1 hàm (như taoVaCapNhatCotNgay) rồi bấm "Xem lại quyền" > "Nâng cao" > "Cho phép".';
       } else if (text.includes('Moved Temporarily')) {
         errorMsg = 'Lỗi chuyển hướng Google Apps Script. Vui lòng kiểm tra lại link Web App.';
       }
@@ -261,17 +332,23 @@ async function loadFromGoogleSheets() {
       return { success: false, error: errorMsg, details: text.substring(0, 150) };
     }
 
-    if (data && data.employees) {
-      const sheetEmpCount = data.employees.length;
-      const sheetSchedCount = data.schedules ? data.schedules.length : 0;
-      console.log(`Sheet data received: ${sheetEmpCount} employees, ${sheetSchedCount} schedules.`);
+    if (data) {
+      const incomingEmps: any[] = Array.isArray(data.employees) ? data.employees : [];
+      const incomingSchedules: any[] = Array.isArray(data.schedules) ? data.schedules : [];
+      const incomingShifts: any[] = Array.isArray(data.shifts) ? data.shifts : [];
 
-      const localEmpCount = db.prepare('SELECT COUNT(*) as count FROM employees').get() as { count: number };
-      
-      if (sheetEmpCount === 0 && localEmpCount.count > 0) {
-        const warnMsg = 'Dữ liệu nhân viên từ Google Sheets trống. Hệ thống đã chặn việc xóa dữ liệu cục bộ để bảo vệ an toàn.';
-        console.warn('⚠️ CẢNH BÁO:', warnMsg);
-        return { success: false, error: warnMsg };
+      const sheetEmpCount = incomingEmps.length;
+      const sheetSchedCount = incomingSchedules.length;
+      console.log(`Sheet data received: ${sheetEmpCount} employees, ${sheetSchedCount} schedules, ${incomingShifts.length} shifts.`);
+
+      const localEmpCount = (db.prepare('SELECT COUNT(*) as count FROM employees').get() as { count: number }).count;
+      const localSchedCount = (db.prepare('SELECT COUNT(*) as count FROM schedules').get() as { count: number }).count;
+
+      // LÁ CHẮN BẢO VỆ: Nếu Google Sheets trả về 0 nhân viên trong khi local đang có dữ liệu thật (>1), KHÔNG ĐƯỢC XÓA TRẮNG DỮ LIỆU CỤC BỘ!
+      if (sheetEmpCount === 0 && localEmpCount > 1) {
+        const warnMsg = 'Google Sheets không trả về nhân viên nào (0 người). Hệ thống đã chặn đồng bộ để bảo vệ toàn bộ dữ liệu hiện tại của bạn không bị xóa trắng. Vui lòng kiểm tra tên tab trên Google Sheet (phải có tab Nhân Viên / Nhan_Vien) và copy mã Apps Script mới nhất.';
+        console.warn('⚠️ CẢNH BÁO BẢO VỆ DỮ LIỆU:', warnMsg);
+        return { success: false, error: warnMsg, employees: 0, schedules: 0 };
       }
 
       try {
@@ -281,43 +358,48 @@ async function loadFromGoogleSheets() {
       }
 
       db.transaction(() => {
-        console.log('Wiping local data and replacing with Sheet data...');
-        // Order: child tables first, then parent tables
-        db.prepare('DELETE FROM announcement_views').run();
-        db.prepare('DELETE FROM task_assignments').run();
-        db.prepare('DELETE FROM schedules').run();
-        db.prepare('DELETE FROM leave_requests').run();
-        db.prepare('DELETE FROM announcements').run();
-        db.prepare('DELETE FROM assigned_tasks').run();
-        db.prepare('DELETE FROM employees').run();
-        db.prepare('DELETE FROM shifts').run();
-        db.prepare('DELETE FROM tasks').run();
-        db.prepare('DELETE FROM locked_months').run();
-        
+        // 1. CẬP NHẬT NHÂN VIÊN AN TOÀN (chỉ thay thế nếu sheet có nhân viên hợp lệ)
         if (sheetEmpCount > 0) {
-          const insertEmp = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          // Lưu dự phòng các ngày vào/nghỉ hiện có vào bảng persistence
+          const currentEmps = db.prepare('SELECT * FROM employees').all() as any[];
+          currentEmps.forEach(ce => {
+            const jDate = ce.joined_date || ce.start_date;
+            const rDate = ce.resigned_date || ce.end_date;
+            if (ce.code && (jDate || rDate)) {
+              db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)')
+                .run(ce.code, ce.name, jDate, rDate, jDate, rDate);
+            }
+          });
+
+          db.prepare('DELETE FROM employees').run();
+
+          const insertEmpWithId = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          const insertEmpNoId = db.prepare('INSERT INTO employees (code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+
           let hasAdmin = false;
-          data.employees.forEach((e: any) => {
+          incomingEmps.forEach((e: any) => {
             let role = e.role || 'Nhân viên';
             const roleLower = role.toLowerCase();
             if (roleLower === 'admin') {
               role = 'Admin';
               hasAdmin = true;
+            } else if (roleLower === 'tổ trưởng') {
+              role = 'Tổ trưởng';
+            } else {
+              role = 'Nhân viên';
             }
-            else if (roleLower === 'tổ trưởng') role = 'Tổ trưởng';
-            else role = 'Nhân viên';
             
             let password = e.password !== undefined && e.password !== null ? String(e.password) : '';
             if (role === 'Admin' && !password) password = '1234';
             
-            // Flexible date field mapping
+            // Xử lý linh hoạt các tên cột ngày
             const rawResigned = e.resigned_date || e.resignedDate || e.end_date || e.endDate || e['end_date'] || e['End Date'] || e.ngay_nghi_viec || e['Ngày nghỉ việc'] || e['Resigned Date'] || e['resignedDate'] || e['Ngày nghỉ'] || e['ngay_nghi'];
             const rawJoined = e.joined_date || e.joinedDate || e.start_date || e.startDate || e['start_date'] || e['Start Date'] || e.ngay_vao_lam || e.joined_at || e['Ngày vào làm'] || e['Ngày bắt đầu'] || e['Joined Date'] || e['joinedDate'] || e['Ngày vào'] || e['ngay_vao'];
             
             let resignedDate = rawResigned ? normalizeDate(rawResigned) : null;
             let joinedDate = rawJoined ? normalizeDate(rawJoined) : null;
             
-            // Persistence recovery logic: if sheet dates are empty, recover from persistence table!
+            // Khôi phục từ persistence nếu ngày trên sheet bị rỗng
             let persistence = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE code = ?').get(e.code) as any;
             if (!persistence && e.name) {
               persistence = db.prepare('SELECT joined_date, resigned_date, start_date, end_date FROM employee_date_persistence WHERE name = ?').get(e.name) as any;
@@ -325,71 +407,145 @@ async function loadFromGoogleSheets() {
             if (!joinedDate && persistence) joinedDate = persistence.joined_date || persistence.start_date;
             if (!resignedDate && persistence) resignedDate = persistence.resigned_date || persistence.end_date;
             
-            // Save to persistence
+            // Cập nhật lại persistence
             if (joinedDate || resignedDate) {
               db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)')
                 .run(e.code, e.name, joinedDate, resignedDate, joinedDate, resignedDate);
             }
             
-            insertEmp.run(e.id, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate);
+            // Khử lỗi ép kiểu id để tránh SQLite mismatch datatype
+            const validId = (e.id !== undefined && e.id !== null && e.id !== '' && !isNaN(Number(e.id)) && Number(e.id) > 0) ? Number(e.id) : null;
+            if (validId) {
+              insertEmpWithId.run(validId, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate);
+            } else {
+              insertEmpNoId.run(e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate);
+            }
           });
           
           if (!hasAdmin) {
-            console.log('No Admin found in Sheet, adding default Admin.');
-            const insertDefaultAdmin = db.prepare('INSERT INTO employees (code, name, department, role, phone, password, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-            insertDefaultAdmin.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234', null, null);
+            console.log('Chưa có Admin trong Sheet, tự động bổ sung Admin mặc định.');
+            insertEmpNoId.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234', null, null, null, null);
           }
-        } else {
-          console.log('Sheet has no employees, keeping/adding default Admin.');
-          const insertDefaultAdmin = db.prepare('INSERT INTO employees (code, name, department, role, phone, password, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-          insertDefaultAdmin.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234', null, null);
+
+          // Cập nhật bản lưu trữ file JSON
+          try {
+            const fileStore = loadEmployeeDatesFromFile();
+            incomingEmps.forEach((e: any) => {
+              if (e.code) {
+                let j = (e.joined_date || e.start_date) ? normalizeDate(e.joined_date || e.start_date) : null;
+                let r = (e.resigned_date || e.end_date) ? normalizeDate(e.resigned_date || e.end_date) : null;
+                if (!j && fileStore[e.code]?.start_date) j = fileStore[e.code].start_date;
+                if (!r && fileStore[e.code]?.end_date) r = fileStore[e.code].end_date;
+                if (j || r) {
+                  fileStore[e.code] = { name: e.name || fileStore[e.code]?.name || '', start_date: j, end_date: r };
+                }
+              }
+            });
+            saveEmployeeDatesToFile(fileStore);
+          } catch (err) {}
         }
 
-        if (data.shifts && data.shifts.length > 0) {
-          const insertShift = db.prepare('INSERT OR REPLACE INTO shifts (id, name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?, ?)');
-          data.shifts.forEach((s: any) => {
+        // 2. CẬP NHẬT CA LÀM VIỆC (chỉ khi sheet có danh mục ca)
+        if (incomingShifts && incomingShifts.length > 0) {
+          db.prepare('DELETE FROM shifts').run();
+          const insertShiftWithId = db.prepare('INSERT OR REPLACE INTO shifts (id, name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?, ?)');
+          const insertShiftNoId = db.prepare('INSERT INTO shifts (name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?)');
+          incomingShifts.forEach((s: any) => {
             let start = s.start_time;
             let end = s.end_time;
             if (start && start.includes('T')) start = start.split('T')[1].substring(0, 5);
             if (end && end.includes('T')) end = end.split('T')[1].substring(0, 5);
-            insertShift.run(s.id, s.name, s.department || 'All', start, end, s.color, s.text_color);
+            const validId = (s.id !== undefined && s.id !== null && s.id !== '' && !isNaN(Number(s.id)) && Number(s.id) > 0) ? Number(s.id) : null;
+            if (validId) {
+              insertShiftWithId.run(validId, s.name, s.department || 'All', start, end, s.color, s.text_color);
+            } else {
+              insertShiftNoId.run(s.name, s.department || 'All', start, end, s.color, s.text_color);
+            }
           });
         }
 
-        if (data.schedules && data.schedules.length > 0) {
+        // 3. CẬP NHẬT LỊCH LÀM VIỆC (tuyệt đối không xóa lịch nếu sheet không có lịch)
+        if (sheetSchedCount > 0) {
+          db.prepare('DELETE FROM schedules').run();
+
           const insertSchedWithId = db.prepare('INSERT OR REPLACE INTO schedules (id, date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?, ?)');
           const insertSchedNoId = db.prepare('INSERT INTO schedules (date, employee_id, shift_id, task, status, note) VALUES (?, ?, ?, ?, ?, ?)');
           
-          // Build employee code/id map
+          // Tạo bản đồ tra cứu nhân viên đa năng (Mã, Tên, ID)
           const empMap: Record<string, number> = {};
           const allEmps = db.prepare('SELECT id, code, name FROM employees').all() as any[];
           allEmps.forEach(e => {
             if (e.code) empMap[e.code.toString().trim().toUpperCase()] = e.id;
-            if (e.name) empMap[e.name.toString().trim().toLowerCase()] = e.id;
+            if (e.name) {
+              empMap[e.name.toString().trim().toLowerCase()] = e.id;
+              empMap[removeVietnameseTones(e.name)] = e.id;
+            }
             if (e.id) empMap[e.id.toString()] = e.id;
           });
 
-          data.schedules.forEach((s: any) => {
+          // Tạo bản đồ tra cứu ca làm việc đa năng (ID, Tên ca, Tên không dấu)
+          const shiftMap: Record<string, number> = {};
+          const allShifts = db.prepare('SELECT id, name FROM shifts').all() as any[];
+          allShifts.forEach(sh => {
+            shiftMap[sh.id.toString()] = sh.id;
+            if (sh.name) {
+              shiftMap[sh.name.toString().trim().toLowerCase()] = sh.id;
+              shiftMap[removeVietnameseTones(sh.name)] = sh.id;
+            }
+          });
+          const defaultShiftId = allShifts.length > 0 ? allShifts[0].id : 1;
+
+          incomingSchedules.forEach((s: any) => {
             const normalizedDate = normalizeDate(s.date);
-            let empId = s.employee_id;
+            if (!normalizedDate) return;
+
+            let empId: any = s.employee_id;
             if (empId !== undefined && empId !== null && empId !== '') {
               const strEmpId = empId.toString().trim();
               if (empMap[strEmpId.toUpperCase()] !== undefined) {
                 empId = empMap[strEmpId.toUpperCase()];
               } else if (empMap[strEmpId.toLowerCase()] !== undefined) {
                 empId = empMap[strEmpId.toLowerCase()];
-              } else if (empMap[strEmpId] !== undefined) {
+              } else if (empMap[removeVietnameseTones(strEmpId)] !== undefined) {
+                empId = empMap[removeVietnameseTones(strEmpId)];
+              } else if (!isNaN(Number(strEmpId)) && empMap[strEmpId] !== undefined) {
                 empId = empMap[strEmpId];
               } else if (!isNaN(Number(strEmpId))) {
                 empId = Number(strEmpId);
               }
             }
-            if (s.id) insertSchedWithId.run(s.id, normalizedDate, empId, s.shift_id, s.task, s.status, s.note);
-            else insertSchedNoId.run(normalizedDate, empId, s.shift_id, s.task, s.status, s.note);
+
+            // Nhận diện mã ca / tên ca linh hoạt
+            let shiftId: any = s.shift_id;
+            if (shiftId !== undefined && shiftId !== null && shiftId !== '') {
+              const strShift = shiftId.toString().trim();
+              if (shiftMap[strShift] !== undefined) {
+                shiftId = shiftMap[strShift];
+              } else if (shiftMap[strShift.toLowerCase()] !== undefined) {
+                shiftId = shiftMap[strShift.toLowerCase()];
+              } else if (shiftMap[removeVietnameseTones(strShift)] !== undefined) {
+                shiftId = shiftMap[removeVietnameseTones(strShift)];
+              } else if (!isNaN(Number(strShift))) {
+                shiftId = Number(strShift);
+              } else {
+                shiftId = defaultShiftId;
+              }
+            } else {
+              shiftId = defaultShiftId;
+            }
+
+            const validSchedId = (s.id !== undefined && s.id !== null && s.id !== '' && !isNaN(Number(s.id)) && Number(s.id) > 0) ? Number(s.id) : null;
+            if (validSchedId) {
+              insertSchedWithId.run(validSchedId, normalizedDate, empId, shiftId, s.task || 'Không', s.status || 'Published', s.note || '');
+            } else {
+              insertSchedNoId.run(normalizedDate, empId, shiftId, s.task || 'Không', s.status || 'Published', s.note || '');
+            }
           });
         }
 
+        // 4. Các bảng cấu hình khác (chỉ cập nhật nếu có dữ liệu từ sheet)
         if (data.lockedMonths && data.lockedMonths.length > 0) {
+          db.prepare('DELETE FROM locked_months').run();
           const insertLock = db.prepare('INSERT OR IGNORE INTO locked_months (month) VALUES (?)');
           data.lockedMonths.forEach((l: any) => {
             if (l && l.month) insertLock.run(l.month);
@@ -397,17 +553,19 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.announcements && data.announcements.length > 0) {
+          db.prepare('DELETE FROM announcements').run();
           const insertAnn = db.prepare('INSERT INTO announcements (id, type, target_type, target_value, message, start_time, end_time, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
           data.announcements.forEach((a: any) => insertAnn.run(a.id, a.type, a.target_type, a.target_value, a.message, a.start_time, a.end_time, a.created_by, a.created_at));
         }
 
-        db.prepare('DELETE FROM announcement_views').run();
         if (data.announcementViews && data.announcementViews.length > 0) {
+          db.prepare('DELETE FROM announcement_views').run();
           const insertView = db.prepare('INSERT INTO announcement_views (announcement_id, employee_id, viewed_at) VALUES (?, ?, ?)');
           data.announcementViews.forEach((v: any) => insertView.run(v.announcement_id, v.employee_id, v.viewed_at));
         }
 
         if (data.leaveRequests && data.leaveRequests.length > 0) {
+          db.prepare('DELETE FROM leave_requests').run();
           const insertLeave = db.prepare('INSERT INTO leave_requests (id, employee_id, date, shift_id, reason, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
           data.leaveRequests.forEach((l: any) => {
             const normalizedDate = normalizeDate(l.date);
@@ -416,16 +574,19 @@ async function loadFromGoogleSheets() {
         }
 
         if (data.tasks && data.tasks.length > 0) {
+          db.prepare('DELETE FROM tasks').run();
           const insertTask = db.prepare('INSERT INTO tasks (id, department, name, color, text_color) VALUES (?, ?, ?, ?, ?)');
           data.tasks.forEach((t: any) => insertTask.run(t.id, t.department, t.name, t.color, t.text_color));
         }
 
         if (data.assignedTasks && data.assignedTasks.length > 0) {
+          db.prepare('DELETE FROM assigned_tasks').run();
           const insertAssigned = db.prepare('INSERT INTO assigned_tasks (id, title, description, created_by, created_at, target_type, target_value) VALUES (?, ?, ?, ?, ?, ?, ?)');
           data.assignedTasks.forEach((t: any) => insertAssigned.run(t.id, t.title, t.description, t.created_by, t.created_at, t.target_type, t.target_value));
         }
 
         if (data.taskAssignments && data.taskAssignments.length > 0) {
+          db.prepare('DELETE FROM task_assignments').run();
           const insertAssign = db.prepare('INSERT INTO task_assignments (task_id, employee_id, status, viewed_at, completed_at) VALUES (?, ?, ?, ?, ?)');
           data.taskAssignments.forEach((a: any) => insertAssign.run(a.task_id, a.employee_id, a.status, a.viewed_at, a.completed_at));
         }
@@ -437,13 +598,18 @@ async function loadFromGoogleSheets() {
         console.warn('Could not re-enable foreign keys:', e);
       }
       
-      // Reconcile leave requests after loading from sheet
+      // Khớp lại đơn xin nghỉ phép với lịch làm việc
       reconcileLeaveRequestsWithSchedules();
-      
       seedTasks();
-      return { success: true, employees: sheetEmpCount, schedules: sheetSchedCount };
+
+      return { 
+        success: true, 
+        employees: sheetEmpCount, 
+        schedules: sheetSchedCount,
+        shifts: incomingShifts.length 
+      };
     }
-    return { success: false, error: 'Dữ liệu từ Google Sheets không hợp lệ hoặc thiếu bảng Nhan_Vien' };
+    return { success: false, error: 'Dữ liệu từ Google Sheets không hợp lệ' };
   } catch (err: any) {
     console.error('Failed to load from Google Sheets:', err);
     return { success: false, error: 'Lỗi kết nối máy chủ Google: ' + err.message };
@@ -712,6 +878,41 @@ if (employeeCount.count === 0) {
 }
 
 async function startServer() {
+  // Tự động khôi phục cài đặt và ngày nhân viên từ bản lưu trữ vĩnh viễn trên file
+  try {
+    const fileSettings = loadSettingsFromFile();
+    if (fileSettings['GOOGLE_SHEETS_URL']) {
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('GOOGLE_SHEETS_URL', fileSettings['GOOGLE_SHEETS_URL']);
+    }
+    if (fileSettings['TL_EDIT_LOCK_HOURS']) {
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('TL_EDIT_LOCK_HOURS', fileSettings['TL_EDIT_LOCK_HOURS']);
+    }
+
+    const fileDates = loadEmployeeDatesFromFile();
+    const upsertPersistence = db.prepare(`
+      INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date, start_date, end_date)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const updateEmpDates = db.prepare(`
+      UPDATE employees 
+      SET start_date = COALESCE(?, start_date), 
+          joined_date = COALESCE(?, joined_date), 
+          end_date = COALESCE(?, end_date), 
+          resigned_date = COALESCE(?, resigned_date)
+      WHERE UPPER(TRIM(code)) = UPPER(TRIM(?))
+    `);
+
+    Object.entries(fileDates).forEach(([code, val]: any) => {
+      if (code && (val.start_date || val.end_date)) {
+        upsertPersistence.run(code, val.name || '', val.start_date, val.end_date, val.start_date, val.end_date);
+        updateEmpDates.run(val.start_date, val.start_date, val.end_date, val.end_date, code);
+      }
+    });
+    console.log(`[Startup] Đã nạp ${Object.keys(fileDates).length} bản ghi ngày nhân viên từ file lưu trữ.`);
+  } catch (err) {
+    console.warn('Lỗi khi nạp bản lưu trữ ngày lúc khởi động:', err);
+  }
+
   await loadFromGoogleSheets();
 
   const app = express();
@@ -781,10 +982,14 @@ async function startServer() {
       const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(code, name, department, role, phone, finalResigned, finalJoined, finalJoined, finalResigned);
       
-      // Save to persistence table
+      // Save to persistence table and file store
       if (finalJoined || finalResigned) {
         db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)')
           .run(code, name, finalJoined, finalResigned, finalJoined, finalResigned);
+        
+        const fileStore = loadEmployeeDatesFromFile();
+        fileStore[code] = { name, start_date: finalJoined, end_date: finalResigned };
+        saveEmployeeDatesToFile(fileStore);
       }
 
       const newEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(result.lastInsertRowid) as any;
@@ -819,10 +1024,14 @@ async function startServer() {
       db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ?, joined_date = ?, start_date = ?, end_date = ? WHERE id = ?')
         .run(code, name, department, role, phone, finalResigned, finalJoined, finalJoined, finalResigned, req.params.id);
       
-      // Save to persistence table
+      // Save to persistence table and file store
       if (finalJoined || finalResigned) {
         db.prepare('INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?)')
           .run(code, name, finalJoined, finalResigned, finalJoined, finalResigned);
+        
+        const fileStore = loadEmployeeDatesFromFile();
+        fileStore[code] = { name, start_date: finalJoined, end_date: finalResigned };
+        saveEmployeeDatesToFile(fileStore);
       }
 
       io.emit('employees:updated');
@@ -831,6 +1040,63 @@ async function startServer() {
       res.json({ success: true, start_date: finalJoined, end_date: finalResigned });
     } catch (error) {
       res.status(400).json({ error: 'Mã nhân viên đã tồn tại hoặc lỗi dữ liệu' });
+    }
+  });
+
+  // Dedicated endpoints for managing preserved employee dates by Code
+  app.get('/api/employee-dates', (req, res) => {
+    try {
+      const dates = db.prepare('SELECT * FROM employee_date_persistence').all();
+      const fileStore = loadEmployeeDatesFromFile();
+      res.json({ db: dates, file: fileStore });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/employee-dates/restore', (req, res) => {
+    try {
+      const { dates } = req.body;
+      if (!dates) return res.status(400).json({ error: 'Thiếu dữ liệu' });
+
+      const items = Array.isArray(dates) ? dates : Object.entries(dates).map(([code, val]: any) => ({ code, ...val }));
+      const upsertPersistence = db.prepare(`
+        INSERT OR REPLACE INTO employee_date_persistence (code, name, joined_date, resigned_date, start_date, end_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const updateEmployee = db.prepare(`
+        UPDATE employees 
+        SET start_date = COALESCE(?, start_date), 
+            joined_date = COALESCE(?, joined_date), 
+            end_date = COALESCE(?, end_date), 
+            resigned_date = COALESCE(?, resigned_date)
+        WHERE UPPER(TRIM(code)) = UPPER(TRIM(?))
+      `);
+
+      const fileStore = loadEmployeeDatesFromFile();
+      let count = 0;
+
+      items.forEach((item: any) => {
+        if (!item.code) return;
+        const code = item.code.toString().trim();
+        const sDate = item.start_date || item.joined_date ? normalizeDate(item.start_date || item.joined_date) : null;
+        const eDate = item.end_date || item.resigned_date ? normalizeDate(item.end_date || item.resigned_date) : null;
+
+        if (sDate || eDate) {
+          upsertPersistence.run(code, item.name || '', sDate, eDate, sDate, eDate);
+          updateEmployee.run(sDate, sDate, eDate, eDate, code);
+          fileStore[code] = { name: item.name || '', start_date: sDate, end_date: eDate };
+          count++;
+        }
+      });
+
+      saveEmployeeDatesToFile(fileStore);
+      io.emit('employees:updated');
+      triggerSync(true);
+
+      res.json({ success: true, restored: count });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Lỗi khôi phục ngày: ' + err.message });
     }
   });
 
@@ -884,7 +1150,14 @@ async function startServer() {
   app.get('/api/schedules', (req, res) => {
     const { start, end } = req.query;
     const schedules = db.prepare(`
-      SELECT s.*, e.name as employee_name, e.department, sh.name as shift_name, sh.start_time, sh.end_time, sh.color, sh.text_color
+      SELECT s.*, 
+        COALESCE(e.name, 'Chưa rõ') as employee_name, 
+        COALESCE(e.department, 'All') as department, 
+        COALESCE(sh.name, 'Chưa gán ca') as shift_name, 
+        COALESCE(sh.start_time, '08:00') as start_time, 
+        COALESCE(sh.end_time, '17:00') as end_time, 
+        COALESCE(sh.color, '#94a3b8') as color, 
+        COALESCE(sh.text_color, '#ffffff') as text_color
       FROM schedules s
       LEFT JOIN employees e ON (s.employee_id = e.id OR s.employee_id = e.code)
       LEFT JOIN shifts sh ON s.shift_id = sh.id
@@ -1153,6 +1426,7 @@ async function startServer() {
   app.post('/api/settings', (req, res) => {
     const { key, value } = req.body;
     db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+    saveSettingsToFile(key, value);
     if (key === 'GOOGLE_SHEETS_URL' && value) {
       loadFromGoogleSheets();
     }

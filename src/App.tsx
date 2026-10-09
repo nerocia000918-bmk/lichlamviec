@@ -49,10 +49,80 @@ export default function App() {
       Notification.requestPermission();
     }
 
-    fetch('/api/employees')
+    // Tự động khôi phục URL Google Sheets & ngày nhân viên từ localStorage nếu máy chủ vừa khởi động lại
+    const localSheetsUrl = localStorage.getItem('GOOGLE_SHEETS_URL');
+    fetch('/api/settings')
       .then(res => res.json())
-      .then(data => setEmployees(data))
+      .then(settings => {
+        const foundUrl = Array.isArray(settings) ? settings.find((s: any) => s.key === 'GOOGLE_SHEETS_URL')?.value : null;
+        if (!foundUrl && localSheetsUrl) {
+          console.log('[Auto-Heal] Khôi phục GOOGLE_SHEETS_URL từ trình duyệt...');
+          fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'GOOGLE_SHEETS_URL', value: localSheetsUrl })
+          }).then(() => {
+            fetch('/api/sync', { method: 'POST' }).then(() => {
+              fetchEmployeesList();
+            });
+          });
+        } else if (foundUrl) {
+          localStorage.setItem('GOOGLE_SHEETS_URL', foundUrl);
+        }
+      })
       .catch(() => {});
+
+    const fetchEmployeesList = () => {
+      fetch('/api/employees')
+        .then(res => res.json())
+        .then((data: any[]) => {
+          if (!Array.isArray(data)) return;
+          setEmployees(data);
+
+          // Cập nhật và tự động bù đắp ngày nhân viên từ bộ nhớ cục bộ (localStorage)
+          try {
+            const rawCache = localStorage.getItem('EMPLOYEE_DATES_CACHE');
+            const cache = rawCache ? JSON.parse(rawCache) : {};
+            let needsRestore = false;
+            const toRestore: Record<string, any> = {};
+
+            data.forEach(emp => {
+              if (emp.code) {
+                const sDate = emp.start_date || emp.joined_date;
+                const eDate = emp.end_date || emp.resigned_date;
+                if (sDate || eDate) {
+                  cache[emp.code] = {
+                    name: emp.name,
+                    start_date: sDate || (cache[emp.code]?.start_date || null),
+                    end_date: eDate || (cache[emp.code]?.end_date || null)
+                  };
+                } else if (cache[emp.code] && (cache[emp.code].start_date || cache[emp.code].end_date)) {
+                  needsRestore = true;
+                  toRestore[emp.code] = cache[emp.code];
+                }
+              }
+            });
+
+            localStorage.setItem('EMPLOYEE_DATES_CACHE', JSON.stringify(cache));
+
+            if (needsRestore && Object.keys(toRestore).length > 0) {
+              console.log('[Auto-Heal] Bù đắp ngày nhân viên bị thiếu từ localStorage:', toRestore);
+              fetch('/api/employee-dates/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dates: toRestore })
+              }).then(() => {
+                fetch('/api/employees')
+                  .then(r => r.json())
+                  .then(refreshed => Array.isArray(refreshed) && setEmployees(refreshed));
+              });
+            }
+          } catch (e) {}
+        })
+        .catch(() => {});
+    };
+
+    fetchEmployeesList();
 
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
