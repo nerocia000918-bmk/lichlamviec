@@ -26,6 +26,7 @@ export interface User {
   role: Role;
   resigned_date?: string | null;
   joined_date?: string | null;
+  is_hidden?: boolean;
 }
 
 export default function App() {
@@ -160,6 +161,21 @@ export default function App() {
         }
       })
       .catch(() => {});
+
+    // Tự động khôi phục danh sách nhân viên bị ẩn từ localStorage nếu máy chủ vừa khởi động lại
+    const localHiddenRaw = localStorage.getItem('HIDDEN_EMPLOYEE_CODES');
+    if (localHiddenRaw) {
+      try {
+        const hiddenList = JSON.parse(localHiddenRaw);
+        if (Array.isArray(hiddenList) && hiddenList.length > 0) {
+          fetch('/api/employees/hidden/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hiddenCodes: hiddenList })
+          }).catch(() => {});
+        }
+      } catch (e) {}
+    }
 
     fetchEmployeesList();
 
@@ -350,10 +366,6 @@ export default function App() {
                 <RefreshCw className="w-4 h-4" />
                 <span>Cấu hình & Kết nối Google Sheet ngay</span>
               </button>
-              <div className="mt-3 pt-2.5 border-t border-amber-200/60 flex items-center justify-between text-[11px] text-amber-800">
-                <span>Tài khoản Admin:</span>
-                <span className="font-mono font-bold bg-amber-100 px-2 py-0.5 rounded text-amber-900">ADMIN / 1234</span>
-              </div>
             </div>
           )}
 

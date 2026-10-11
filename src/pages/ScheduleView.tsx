@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import { format, addDays, startOfWeek, subWeeks, isBefore, addHours, parseISO, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { User, socket } from '../App';
-import { ChevronLeft, ChevronRight, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, X, Trash2, Settings, RefreshCw, AlertCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, X, Trash2, Settings, RefreshCw, AlertCircle, Users } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Employee {
@@ -16,6 +16,9 @@ interface Employee {
   role: string;
   resigned_date?: string | null;
   joined_date?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  is_hidden?: boolean;
 }
 
 interface Shift {
@@ -176,8 +179,31 @@ export default function ScheduleView({ user }: { user: User | null }) {
     const DEPARTMENTS = ['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho'];
     const ROLES = ['Admin', 'Tổ trưởng', 'Nhân viên'];
 
+    // Lấy thêm danh sách nhân viên ẩn từ cache trình duyệt để phản hồi ngay lập tức và chống mất sau khởi động lại
+    let cachedHiddenSet = new Set<string>();
+    try {
+      const raw = localStorage.getItem('HIDDEN_EMPLOYEE_CODES');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) arr.forEach(c => cachedHiddenSet.add(String(c).trim().toUpperCase()));
+      }
+    } catch (errCache) {}
+
     return employees
       .filter(e => {
+        const codeUpper = (e.code || '').trim().toUpperCase();
+        const roleLower = (e.role || '').trim().toLowerCase();
+
+        // 1. Tuyệt đối KHÔNG hiển thị tài khoản Quản trị viên / Admin trên bảng lịch làm việc
+        if (codeUpper === 'ADMIN' || roleLower === 'admin') {
+          return false;
+        }
+
+        // 2. Tuyệt đối KHÔNG hiển thị nhân viên đã được tick chọn ẩn (is_hidden) trên lịch
+        if (e.is_hidden || (codeUpper && cachedHiddenSet.has(codeUpper))) {
+          return false;
+        }
+
         // Filter out resigned employees if they resigned before the start of the current week
         if (e.resigned_date) {
           const resignedDate = new Date(e.resigned_date);
@@ -704,7 +730,22 @@ export default function ScheduleView({ user }: { user: User | null }) {
               </tr>
             </thead>
             <tbody>
-              {Array.from(new Set(filteredEmployees.map(e => e.department))).map(dept => (
+              {filteredEmployees.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-12 text-center text-slate-500 bg-white">
+                    <div className="max-w-md mx-auto space-y-2">
+                      <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto mb-2">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <p className="font-semibold text-slate-700 text-base">Chưa có nhân viên hiển thị trên lịch</p>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Các nhân viên có thể đã được ẩn hoặc hệ thống chưa đồng bộ từ Google Sheets. Bạn có thể kiểm tra tab Nhân sự hoặc Cài đặt dữ liệu.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                Array.from(new Set(filteredEmployees.map(e => e.department))).map(dept => (
                 <React.Fragment key={dept}>
                   <tr className="bg-slate-100/80 border-y border-slate-200">
                     <td colSpan={8} className="p-3 pl-10 font-bold text-slate-700 uppercase tracking-wider text-sm sticky left-0 z-20 bg-slate-100/80">
@@ -804,7 +845,7 @@ export default function ScheduleView({ user }: { user: User | null }) {
                     </tr>
                   ))}
                 </React.Fragment>
-              ))}
+              )))}
             </tbody>
           </table>
         </div>

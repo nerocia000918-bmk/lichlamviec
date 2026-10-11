@@ -12,6 +12,27 @@ const db = new Database('schedule.db');
 
 const PERSISTENCE_FILE = './employee_dates_store.json';
 const SETTINGS_FILE = './server_settings.json';
+const HIDDEN_EMPLOYEES_FILE = './hidden_employees_store.json';
+
+function saveHiddenEmployeesToFile(store: Record<string, boolean>) {
+  try {
+    fs.writeFileSync(HIDDEN_EMPLOYEES_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('Could not write hidden_employees_store.json:', e);
+  }
+}
+
+function loadHiddenEmployeesFromFile(): Record<string, boolean> {
+  try {
+    if (fs.existsSync(HIDDEN_EMPLOYEES_FILE)) {
+      const data = fs.readFileSync(HIDDEN_EMPLOYEES_FILE, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.error('Could not read hidden_employees_store.json:', e);
+  }
+  return {};
+}
 
 function saveEmployeeDatesToFile(store: Record<string, { name?: string; start_date?: string | null; end_date?: string | null }>) {
   try {
@@ -387,10 +408,21 @@ async function loadFromGoogleSheets() {
             }
           });
 
+          // Lưu dự phòng danh sách nhân viên bị ẩn hiện có
+          const hiddenSet = new Set<string>();
+          try {
+            const hDb = db.prepare('SELECT code FROM hidden_employees WHERE hidden = 1').all() as any[];
+            hDb.forEach(h => h.code && hiddenSet.add(h.code.trim().toUpperCase()));
+            const hFile = loadHiddenEmployeesFromFile();
+            Object.keys(hFile).forEach(k => hFile[k] && hiddenSet.add(k.trim().toUpperCase()));
+            const hEmps = db.prepare('SELECT code FROM employees WHERE is_hidden = 1').all() as any[];
+            hEmps.forEach(h => h.code && hiddenSet.add(h.code.trim().toUpperCase()));
+          } catch (errH) {}
+
           db.prepare('DELETE FROM employees').run();
 
-          const insertEmpWithId = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-          const insertEmpNoId = db.prepare('INSERT INTO employees (code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          const insertEmpWithId = db.prepare('INSERT OR REPLACE INTO employees (id, code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          const insertEmpNoId = db.prepare('INSERT INTO employees (code, name, department, role, phone, password, resigned_date, joined_date, start_date, end_date, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 
           let hasAdmin = false;
           incomingEmps.forEach((e: any) => {
@@ -437,18 +469,20 @@ async function loadFromGoogleSheets() {
                 .run(e.code, e.name, joinedDate, resignedDate, joinedDate, resignedDate);
             }
             
+            const isHidden = (e.code && hiddenSet.has(e.code.trim().toUpperCase())) ? 1 : 0;
+
             // Khử lỗi ép kiểu id để tránh SQLite mismatch datatype
             const validId = (e.id !== undefined && e.id !== null && e.id !== '' && !isNaN(Number(e.id)) && Number(e.id) > 0) ? Number(e.id) : null;
             if (validId) {
-              insertEmpWithId.run(validId, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate);
+              insertEmpWithId.run(validId, e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate, isHidden);
             } else {
-              insertEmpNoId.run(e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate);
+              insertEmpNoId.run(e.code, e.name, e.department, role, e.phone, password, resignedDate, joinedDate, joinedDate, resignedDate, isHidden);
             }
           });
           
           if (!hasAdmin) {
             console.log('Chưa có Admin trong Sheet, tự động bổ sung Admin mặc định.');
-            insertEmpNoId.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234', null, null, null, null);
+            insertEmpNoId.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234', null, null, null, null, 1);
           }
 
           // Cập nhật bản lưu trữ file JSON
@@ -671,7 +705,8 @@ db.exec(`
     resigned_date TEXT,
     joined_date TEXT,
     start_date TEXT,
-    end_date TEXT
+    end_date TEXT,
+    is_hidden INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS shifts (
@@ -815,6 +850,22 @@ try {
   db.exec('ALTER TABLE employee_date_persistence ADD COLUMN end_date TEXT');
 } catch (e) {}
 
+// Add is_hidden column to employees and create hidden_employees persistence table
+try {
+  db.exec('ALTER TABLE employees ADD COLUMN is_hidden INTEGER DEFAULT 0');
+} catch (e) {}
+
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS hidden_employees (
+      code TEXT PRIMARY KEY,
+      name TEXT,
+      hidden INTEGER DEFAULT 1,
+      updated_at TEXT
+    );
+  `);
+} catch (e) {}
+
 // Add start_time and end_time to announcements if not exists
 try {
   db.exec('ALTER TABLE announcements ADD COLUMN start_time TEXT');
@@ -838,8 +889,12 @@ try {
   db.exec('ALTER TABLE announcements ADD COLUMN created_at TEXT');
 } catch (e) {}
 
-// Set default password for existing admins
+// Set default password for existing admins & set admin as hidden on schedule
 db.prepare("UPDATE employees SET password = ? WHERE role = 'Admin' AND (password IS NULL OR password = '')").run('1234');
+try {
+  db.prepare("UPDATE employees SET is_hidden = 1 WHERE UPPER(TRIM(code)) = 'ADMIN' OR role = 'Admin'").run();
+  db.prepare("INSERT OR REPLACE INTO hidden_employees (code, name, hidden, updated_at) VALUES ('ADMIN', 'Quản trị viên', 1, datetime('now'))").run();
+} catch (e) {}
 
 seedTasks();
 
@@ -870,7 +925,7 @@ try {
 // Seed initial data if empty
 const employeeCount = db.prepare('SELECT COUNT(*) as count FROM employees').get() as { count: number };
 if (employeeCount.count === 0) {
-  const insertEmployee = db.prepare('INSERT INTO employees (code, name, department, role, phone, password) VALUES (?, ?, ?, ?, ?, ?)');
+  const insertEmployee = db.prepare('INSERT INTO employees (code, name, department, role, phone, password, is_hidden) VALUES (?, ?, ?, ?, ?, ?, 1)');
   insertEmployee.run('ADMIN', 'Quản trị viên', 'Quản lý', 'Admin', '0999999999', '1234');
 
   const insertShift = db.prepare('INSERT INTO shifts (name, department, start_time, end_time, color, text_color) VALUES (?, ?, ?, ?, ?, ?)');
@@ -933,6 +988,16 @@ async function startServer() {
       }
     });
     console.log(`[Startup] Đã nạp ${Object.keys(fileDates).length} bản ghi ngày nhân viên từ file lưu trữ.`);
+
+    // Khôi phục danh sách nhân viên bị ẩn từ file lưu trữ vĩnh viễn
+    const hiddenStore = loadHiddenEmployeesFromFile();
+    const hiddenCodes = Object.keys(hiddenStore).filter(c => hiddenStore[c]);
+    hiddenCodes.forEach(code => {
+      const codeUpper = code.trim().toUpperCase();
+      db.prepare('INSERT OR REPLACE INTO hidden_employees (code, hidden, updated_at) VALUES (?, 1, CURRENT_TIMESTAMP)').run(codeUpper);
+      db.prepare('UPDATE employees SET is_hidden = 1 WHERE UPPER(TRIM(code)) = ?').run(codeUpper);
+    });
+    console.log(`[Startup] Đã nạp ${hiddenCodes.length} nhân viên bị ẩn trên lịch từ file lưu trữ.`);
   } catch (err) {
     console.warn('Lỗi khi nạp bản lưu trữ ngày lúc khởi động:', err);
   }
@@ -955,6 +1020,12 @@ async function startServer() {
 
   app.get('/api/employees', (req, res) => {
     try {
+      const hiddenStore = loadHiddenEmployeesFromFile();
+      const hiddenDb = db.prepare('SELECT code FROM hidden_employees WHERE hidden = 1').all() as any[];
+      const hiddenCodesSet = new Set<string>();
+      hiddenDb.forEach(h => h.code && hiddenCodesSet.add(h.code.trim().toUpperCase()));
+      Object.keys(hiddenStore).forEach(k => hiddenStore[k] && hiddenCodesSet.add(k.trim().toUpperCase()));
+
       const rawEmployees = db.prepare('SELECT * FROM employees').all() as any[];
       const employees = rawEmployees.map(e => {
         let joined = e.joined_date || e.start_date;
@@ -978,6 +1049,9 @@ async function startServer() {
         const joinedNorm = joined ? normalizeDate(joined) : null;
         const resignedNorm = resigned ? normalizeDate(resigned) : null;
 
+        const codeUpper = (e.code || '').trim().toUpperCase();
+        const isHidden = Boolean(e.is_hidden || hiddenCodesSet.has(codeUpper));
+
         return {
           ...e,
           name: e.name || '',
@@ -987,7 +1061,8 @@ async function startServer() {
           joined_date: joinedNorm,
           resigned_date: resignedNorm,
           start_date: joinedNorm,
-          end_date: resignedNorm
+          end_date: resignedNorm,
+          is_hidden: isHidden
         };
       });
       res.json(employees);
@@ -998,13 +1073,14 @@ async function startServer() {
   });
 
   app.post('/api/employees', (req, res) => {
-    const { code, name, department, role, phone, resigned_date, joined_date, start_date, end_date } = req.body;
+    const { code, name, department, role, phone, resigned_date, joined_date, start_date, end_date, is_hidden } = req.body;
     const finalJoined = (joined_date || start_date) ? normalizeDate(joined_date || start_date) : null;
     const finalResigned = (resigned_date || end_date) ? normalizeDate(resigned_date || end_date) : null;
+    const hiddenVal = is_hidden ? 1 : 0;
     
     try {
-      const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date, joined_date, start_date, end_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(code, name, department, role, phone, finalResigned, finalJoined, finalJoined, finalResigned);
+      const result = db.prepare('INSERT INTO employees (code, name, department, role, phone, resigned_date, joined_date, start_date, end_date, is_hidden) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(code, name, department, role, phone, finalResigned, finalJoined, finalJoined, finalResigned, hiddenVal);
       
       // Save to persistence table and file store
       if (finalJoined || finalResigned) {
@@ -1016,13 +1092,27 @@ async function startServer() {
         saveEmployeeDatesToFile(fileStore);
       }
 
+      if (code) {
+        const codeUpper = code.trim().toUpperCase();
+        if (hiddenVal === 1) {
+          db.prepare('INSERT OR REPLACE INTO hidden_employees (code, hidden, updated_at) VALUES (?, 1, CURRENT_TIMESTAMP)').run(codeUpper);
+        } else {
+          db.prepare('DELETE FROM hidden_employees WHERE UPPER(TRIM(code)) = ?').run(codeUpper);
+        }
+        const hiddenStore = loadHiddenEmployeesFromFile();
+        if (hiddenVal === 1) hiddenStore[codeUpper] = true;
+        else delete hiddenStore[codeUpper];
+        saveHiddenEmployeesToFile(hiddenStore);
+      }
+
       const newEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(result.lastInsertRowid) as any;
       const responseEmp = {
         ...newEmployee,
         joined_date: finalJoined,
         resigned_date: finalResigned,
         start_date: finalJoined,
-        end_date: finalResigned
+        end_date: finalResigned,
+        is_hidden: Boolean(hiddenVal)
       };
 
       io.emit('employees:updated');
@@ -1034,19 +1124,20 @@ async function startServer() {
   });
 
   app.put('/api/employees/:id', (req, res) => {
-    const { code, name, department, role, phone, resigned_date, joined_date, start_date, end_date } = req.body;
+    const { code, name, department, role, phone, resigned_date, joined_date, start_date, end_date, is_hidden } = req.body;
     
     // Check current employee to avoid wiping if field was omitted
     const currentEmp = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id) as any;
     let rawJoined = (joined_date !== undefined) ? joined_date : (start_date !== undefined ? start_date : (currentEmp?.joined_date || currentEmp?.start_date));
     let rawResigned = (resigned_date !== undefined) ? resigned_date : (end_date !== undefined ? end_date : (currentEmp?.resigned_date || currentEmp?.end_date));
+    let finalHidden = (is_hidden !== undefined) ? (is_hidden ? 1 : 0) : (currentEmp?.is_hidden || 0);
 
     const finalJoined = rawJoined ? normalizeDate(rawJoined) : null;
     const finalResigned = rawResigned ? normalizeDate(rawResigned) : null;
 
     try {
-      db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ?, joined_date = ?, start_date = ?, end_date = ? WHERE id = ?')
-        .run(code, name, department, role, phone, finalResigned, finalJoined, finalJoined, finalResigned, req.params.id);
+      db.prepare('UPDATE employees SET code = ?, name = ?, department = ?, role = ?, phone = ?, resigned_date = ?, joined_date = ?, start_date = ?, end_date = ?, is_hidden = ? WHERE id = ?')
+        .run(code, name, department, role, phone, finalResigned, finalJoined, finalJoined, finalResigned, finalHidden, req.params.id);
       
       // Save to persistence table and file store
       if (finalJoined || finalResigned) {
@@ -1058,12 +1149,102 @@ async function startServer() {
         saveEmployeeDatesToFile(fileStore);
       }
 
+      if (code) {
+        const codeUpper = code.trim().toUpperCase();
+        if (finalHidden === 1) {
+          db.prepare('INSERT OR REPLACE INTO hidden_employees (code, hidden, updated_at) VALUES (?, 1, CURRENT_TIMESTAMP)').run(codeUpper);
+        } else {
+          db.prepare('DELETE FROM hidden_employees WHERE UPPER(TRIM(code)) = ?').run(codeUpper);
+        }
+        const hiddenStore = loadHiddenEmployeesFromFile();
+        if (finalHidden === 1) hiddenStore[codeUpper] = true;
+        else delete hiddenStore[codeUpper];
+        saveHiddenEmployeesToFile(hiddenStore);
+      }
+
       io.emit('employees:updated');
       io.emit('schedules:updated');
       triggerSync(true); // immediate sync to Google Sheets
-      res.json({ success: true, start_date: finalJoined, end_date: finalResigned });
+      res.json({ success: true, start_date: finalJoined, end_date: finalResigned, is_hidden: Boolean(finalHidden) });
     } catch (error) {
       res.status(400).json({ error: 'Mã nhân viên đã tồn tại hoặc lỗi dữ liệu' });
+    }
+  });
+
+  // Dedicated endpoints for hiding / unhiding employees on schedule
+  app.post('/api/employees/toggle-hidden', (req, res) => {
+    try {
+      const { id, code, is_hidden } = req.body;
+      const hiddenVal = is_hidden ? 1 : 0;
+
+      let empCode = code;
+      if (!empCode && id) {
+        const emp = db.prepare('SELECT code FROM employees WHERE id = ?').get(id) as any;
+        if (emp) empCode = emp.code;
+      }
+
+      if (id) {
+        db.prepare('UPDATE employees SET is_hidden = ? WHERE id = ?').run(hiddenVal, id);
+      }
+
+      if (empCode) {
+        const codeUpper = empCode.trim().toUpperCase();
+        db.prepare('UPDATE employees SET is_hidden = ? WHERE UPPER(TRIM(code)) = ?').run(hiddenVal, codeUpper);
+        if (hiddenVal === 1) {
+          db.prepare('INSERT OR REPLACE INTO hidden_employees (code, hidden, updated_at) VALUES (?, 1, CURRENT_TIMESTAMP)').run(codeUpper);
+        } else {
+          db.prepare('DELETE FROM hidden_employees WHERE UPPER(TRIM(code)) = ?').run(codeUpper);
+        }
+
+        const hiddenStore = loadHiddenEmployeesFromFile();
+        if (hiddenVal === 1) {
+          hiddenStore[codeUpper] = true;
+        } else {
+          delete hiddenStore[codeUpper];
+        }
+        saveHiddenEmployeesToFile(hiddenStore);
+      }
+
+      io.emit('employees:updated');
+      io.emit('schedules:updated');
+      res.json({ success: true, is_hidden: Boolean(hiddenVal), code: empCode });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Lỗi cập nhật trạng thái ẩn: ' + err.message });
+    }
+  });
+
+  app.get('/api/employees/hidden', (req, res) => {
+    try {
+      const hiddenStore = loadHiddenEmployeesFromFile();
+      const hiddenDb = db.prepare('SELECT code FROM hidden_employees WHERE hidden = 1').all() as any[];
+      const set = new Set<string>();
+      hiddenDb.forEach(h => h.code && set.add(h.code.trim().toUpperCase()));
+      Object.keys(hiddenStore).forEach(k => hiddenStore[k] && set.add(k.trim().toUpperCase()));
+      res.json({ hiddenCodes: Array.from(set) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/employees/hidden/restore', (req, res) => {
+    try {
+      const { hiddenCodes } = req.body;
+      if (Array.isArray(hiddenCodes)) {
+        const hiddenStore = loadHiddenEmployeesFromFile();
+        hiddenCodes.forEach((c: string) => {
+          if (!c) return;
+          const codeUpper = c.trim().toUpperCase();
+          hiddenStore[codeUpper] = true;
+          db.prepare('INSERT OR REPLACE INTO hidden_employees (code, hidden, updated_at) VALUES (?, 1, CURRENT_TIMESTAMP)').run(codeUpper);
+          db.prepare('UPDATE employees SET is_hidden = 1 WHERE UPPER(TRIM(code)) = ?').run(codeUpper);
+        });
+        saveHiddenEmployeesToFile(hiddenStore);
+        io.emit('employees:updated');
+        io.emit('schedules:updated');
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

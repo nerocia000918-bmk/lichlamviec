@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 import { Role } from '../types';
-import { Search, UserPlus, Edit2, Trash2, Calendar, Download, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Search, UserPlus, Edit2, Trash2, Calendar, Download, RefreshCw, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Employee {
@@ -15,6 +15,7 @@ interface Employee {
   joined_date?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  is_hidden?: boolean;
 }
 
 const DEPARTMENTS = ['Quản lý', 'Bán hàng', 'Thu ngân', 'Kỹ thuật', 'Giao vận', 'Kho'];
@@ -32,6 +33,7 @@ const formatDateDisplay = (dateStr?: string | null) => {
 export default function EmployeeList({ role }: { role: Role }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [search, setSearch] = useState('');
+  const [filterHidden, setFilterHidden] = useState<'all' | 'visible' | 'hidden'>('all');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState({ 
@@ -43,13 +45,48 @@ export default function EmployeeList({ role }: { role: Role }) {
     resigned_date: '', 
     joined_date: '',
     start_date: '',
-    end_date: ''
+    end_date: '',
+    is_hidden: false
   });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number, name: string } | null>(null);
   const [showDatesModal, setShowDatesModal] = useState(false);
   const [savedDatesStore, setSavedDatesStore] = useState<any[]>([]);
   const [datesLoading, setDatesLoading] = useState(false);
   const [restoreStatus, setRestoreStatus] = useState<string | null>(null);
+
+  const handleToggleHide = async (emp: Employee) => {
+    const nextHidden = !emp.is_hidden;
+
+    // Optimistic UI update
+    setEmployees(prev => prev.map(e => e.id === emp.id ? { ...e, is_hidden: nextHidden } : e));
+
+    // Update local cache
+    try {
+      const raw = localStorage.getItem('HIDDEN_EMPLOYEE_CODES');
+      const list: string[] = raw ? JSON.parse(raw) : [];
+      const codeUpper = emp.code.trim().toUpperCase();
+      let updated: string[];
+      if (nextHidden) {
+        updated = Array.from(new Set([...list, codeUpper]));
+      } else {
+        updated = list.filter(c => c !== codeUpper);
+      }
+      localStorage.setItem('HIDDEN_EMPLOYEE_CODES', JSON.stringify(updated));
+    } catch (e) {}
+
+    try {
+      const res = await fetch('/api/employees/toggle-hidden', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: emp.id, code: emp.code, is_hidden: nextHidden })
+      });
+      if (!res.ok) {
+        fetchEmployees();
+      }
+    } catch (err) {
+      fetchEmployees();
+    }
+  };
 
   const fetchSavedDates = async () => {
     setDatesLoading(true);
@@ -160,6 +197,23 @@ export default function EmployeeList({ role }: { role: Role }) {
             if (updated) {
               localStorage.setItem('EMPLOYEE_DATES_CACHE', JSON.stringify(cache));
             }
+
+            // Đồng bộ danh sách nhân viên ẩn vào localStorage để chống mất khi khởi động lại
+            const hiddenCodesOnServer = data.filter(e => e.is_hidden && e.code).map(e => e.code.trim().toUpperCase());
+            const rawHidden = localStorage.getItem('HIDDEN_EMPLOYEE_CODES');
+            const localHidden: string[] = rawHidden ? JSON.parse(rawHidden) : [];
+            const mergedHidden = Array.from(new Set([...localHidden, ...hiddenCodesOnServer]));
+            localStorage.setItem('HIDDEN_EMPLOYEE_CODES', JSON.stringify(mergedHidden));
+
+            // Nếu trong localStorage có mã ẩn mà server chưa có (vừa reboot server), tự động restore lên server
+            const missingOnServer = localHidden.filter(c => !hiddenCodesOnServer.includes(c));
+            if (missingOnServer.length > 0) {
+              fetch('/api/employees/hidden/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hiddenCodes: localHidden })
+              }).catch(() => {});
+            }
           } catch (err) {}
         }
       }
@@ -187,7 +241,8 @@ export default function EmployeeList({ role }: { role: Role }) {
       resigned_date: '', 
       joined_date: '',
       start_date: '',
-      end_date: ''
+      end_date: '',
+      is_hidden: false
     });
     setShowForm(true);
   };
@@ -205,7 +260,8 @@ export default function EmployeeList({ role }: { role: Role }) {
       resigned_date: endVal,
       joined_date: startVal,
       start_date: startVal,
-      end_date: endVal
+      end_date: endVal,
+      is_hidden: Boolean(emp.is_hidden)
     });
     setShowForm(true);
   };
@@ -260,12 +316,22 @@ export default function EmployeeList({ role }: { role: Role }) {
     }
   };
 
-  const filtered = employees
-    .filter(e => 
-      (e.name || '').toLowerCase().includes(search.toLowerCase()) || 
-      (e.code || '').toLowerCase().includes(search.toLowerCase()) ||
-      (e.department || '').toLowerCase().includes(search.toLowerCase())
-    )
+  const allStaff = employees.filter(e => (e.code || '').trim().toUpperCase() !== 'ADMIN');
+  const visibleStaffCount = allStaff.filter(e => !e.is_hidden).length;
+  const hiddenStaffCount = allStaff.filter(e => e.is_hidden).length;
+
+  const filtered = allStaff
+    .filter(e => {
+      // Lọc theo tab Ẩn / Hiện
+      if (filterHidden === 'visible' && e.is_hidden) return false;
+      if (filterHidden === 'hidden' && !e.is_hidden) return false;
+
+      return (
+        (e.name || '').toLowerCase().includes(search.toLowerCase()) || 
+        (e.code || '').toLowerCase().includes(search.toLowerCase()) ||
+        (e.department || '').toLowerCase().includes(search.toLowerCase())
+      );
+    })
     .sort((a, b) => {
       const deptA = DEPARTMENTS.indexOf(a.department || '');
       const deptB = DEPARTMENTS.indexOf(b.department || '');
@@ -283,7 +349,7 @@ export default function EmployeeList({ role }: { role: Role }) {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Nhân sự / Staff</h2>
-          <p className="text-slate-500">Quản lý danh sách nhân viên</p>
+          <p className="text-slate-500">Quản lý danh sách nhân viên & ẩn/hiện trên lịch</p>
         </div>
         
         {role === 'Admin' && (
@@ -311,16 +377,52 @@ export default function EmployeeList({ role }: { role: Role }) {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-6">
-        <div className="p-4 border-b border-slate-100">
-          <div className="relative max-w-md">
+        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
             <input 
               type="text" 
               placeholder="Tìm kiếm theo tên, mã NV, bộ phận..." 
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-sm"
             />
+          </div>
+
+          {/* Bộ lọc trạng thái ẩn/hiện lịch làm việc */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setFilterHidden('all')}
+              className={clsx(
+                "px-3 py-1.5 rounded-lg transition-all",
+                filterHidden === 'all' ? "bg-white text-slate-800 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
+              )}
+            >
+              Tất cả ({allStaff.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterHidden('visible')}
+              className={clsx(
+                "px-3 py-1.5 rounded-lg transition-all flex items-center gap-1",
+                filterHidden === 'visible' ? "bg-white text-emerald-700 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
+              )}
+            >
+              <Eye className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Hiện trên lịch ({visibleStaffCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterHidden('hidden')}
+              className={clsx(
+                "px-3 py-1.5 rounded-lg transition-all flex items-center gap-1",
+                filterHidden === 'hidden' ? "bg-white text-rose-700 shadow-xs font-bold" : "text-slate-600 hover:text-slate-900"
+              )}
+            >
+              <EyeOff className="w-3.5 h-3.5 text-rose-600" />
+              <span>Đã ẩn lịch ({hiddenStaffCount})</span>
+            </button>
           </div>
         </div>
 
@@ -336,14 +438,22 @@ export default function EmployeeList({ role }: { role: Role }) {
                 <th className="p-4 font-medium border-b border-slate-200">SĐT</th>
                 <th className="p-4 font-medium border-b border-slate-200">Ngày bắt đầu</th>
                 <th className="p-4 font-medium border-b border-slate-200">Ngày nghỉ việc</th>
+                <th className="p-4 font-medium border-b border-slate-200 text-center">Ẩn trên lịch</th>
                 {role === 'Admin' && <th className="p-4 font-medium border-b border-slate-200 text-right">Thao tác</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map(emp => (
-                <tr key={emp.id} className="hover:bg-slate-50 transition-colors">
+                <tr key={emp.id} className={clsx("transition-colors", emp.is_hidden ? "bg-rose-50/20 hover:bg-rose-50/40" : "hover:bg-slate-50")}>
                   <td className="p-4 font-mono text-sm text-slate-600">{emp.code}</td>
-                  <td className="p-4 font-medium text-slate-800">{emp.name}</td>
+                  <td className="p-4 font-medium text-slate-800">
+                    <div className="flex items-center gap-2">
+                      <span>{emp.name}</span>
+                      {emp.is_hidden && (
+                        <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">Ẩn</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="p-4">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
                       {emp.department}
@@ -369,13 +479,35 @@ export default function EmployeeList({ role }: { role: Role }) {
                       <span className="text-slate-400 italic">Đang làm việc</span>
                     )}
                   </td>
+                  {/* Cột Tick chọn Ẩn / Hiện trên lịch làm việc */}
+                  <td className="p-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleHide(emp)}
+                      className={clsx(
+                        "inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs cursor-pointer active:scale-95",
+                        emp.is_hidden
+                          ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                      )}
+                      title={emp.is_hidden ? "Đang ẩn khỏi lịch làm việc. Nhấp để HIỆN lại trên lịch!" : "Đang hiện trên lịch. Nhấp để ẨN khỏi lịch làm việc!"}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(emp.is_hidden)}
+                        onChange={() => {}}
+                        className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer pointer-events-none accent-rose-600"
+                      />
+                      <span>{emp.is_hidden ? 'Đã ẩn lịch' : 'Hiện trên lịch'}</span>
+                    </button>
+                  </td>
                   {role === 'Admin' && (
                     <td className="p-4 text-right">
                       <div className="flex justify-end gap-2">
-                        <button onClick={() => openEditForm(emp)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                        <button onClick={() => openEditForm(emp)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Sửa thông tin">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button onClick={() => setDeleteConfirm({ id: emp.id, name: emp.name })} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                        <button onClick={() => setDeleteConfirm({ id: emp.id, name: emp.name })} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Xóa nhân viên">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -385,7 +517,7 @@ export default function EmployeeList({ role }: { role: Role }) {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={role === 'Admin' ? 6 : 5} className="p-8 text-center text-slate-500">
+                  <td colSpan={role === 'Admin' ? 9 : 8} className="p-8 text-center text-slate-500">
                     Không tìm thấy nhân viên nào.
                   </td>
                 </tr>
@@ -398,10 +530,15 @@ export default function EmployeeList({ role }: { role: Role }) {
       {/* Mobile Card View */}
       <div className="md:hidden space-y-4">
         {filtered.map(emp => (
-          <div key={emp.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+          <div key={emp.id} className={clsx("bg-white p-4 rounded-2xl shadow-sm border transition-all", emp.is_hidden ? "border-rose-200 bg-rose-50/20" : "border-slate-200")}>
             <div className="flex justify-between items-start mb-3">
               <div>
-                <div className="font-bold text-slate-800 text-lg">{emp.name}</div>
+                <div className="flex items-center gap-2">
+                  <div className="font-bold text-slate-800 text-lg">{emp.name}</div>
+                  {emp.is_hidden && (
+                    <span className="text-[10px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">Đã ẩn</span>
+                  )}
+                </div>
                 <div className="text-sm text-slate-500 font-mono mt-0.5">{emp.code}</div>
               </div>
               {role === 'Admin' && (
@@ -415,21 +552,44 @@ export default function EmployeeList({ role }: { role: Role }) {
                 </div>
               )}
             </div>
-              <div className="flex flex-wrap gap-2 text-sm">
-                <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">{emp.department}</span>
-                <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.role}</span>
-                {emp.phone && <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.phone}</span>}
-                {(emp.start_date || emp.joined_date) && (
-                  <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">
-                    Bắt đầu: {formatDateDisplay(emp.start_date || emp.joined_date)}
-                  </span>
+            <div className="flex flex-wrap gap-2 text-sm mb-3">
+              <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">{emp.department}</span>
+              <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.role}</span>
+              {emp.phone && <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">{emp.phone}</span>}
+              {(emp.start_date || emp.joined_date) && (
+                <span className="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg font-medium">
+                  Bắt đầu: {formatDateDisplay(emp.start_date || emp.joined_date)}
+                </span>
+              )}
+              {(emp.end_date || emp.resigned_date) && (
+                <span className="bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">
+                  Nghỉ việc: {formatDateDisplay(emp.end_date || emp.resigned_date)}
+                </span>
+              )}
+            </div>
+
+            {/* Nút tick chọn ẩn lịch trên mobile */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-xs text-slate-500">Trạng thái trên lịch:</span>
+              <button
+                type="button"
+                onClick={() => handleToggleHide(emp)}
+                className={clsx(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shadow-xs active:scale-95",
+                  emp.is_hidden
+                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
                 )}
-                {(emp.end_date || emp.resigned_date) && (
-                  <span className="bg-red-50 text-red-700 px-2.5 py-1 rounded-lg font-medium">
-                    Nghỉ việc: {formatDateDisplay(emp.end_date || emp.resigned_date)}
-                  </span>
-                )}
-              </div>
+              >
+                <input
+                  type="checkbox"
+                  checked={Boolean(emp.is_hidden)}
+                  onChange={() => {}}
+                  className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 cursor-pointer pointer-events-none accent-rose-600"
+                />
+                <span>{emp.is_hidden ? 'Đã ẩn trên lịch làm việc' : 'Đang hiện trên lịch làm việc'}</span>
+              </button>
+            </div>
           </div>
         ))}
         {filtered.length === 0 && (
@@ -492,6 +652,25 @@ export default function EmployeeList({ role }: { role: Role }) {
                   className="w-full p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
                 />
                 <p className="text-xs text-slate-500 mt-1 italic">Tự động đồng bộ vào cột end_date / resigned_date trên Google Sheets.</p>
+              </div>
+
+              {/* Tùy chọn Ẩn trên lịch làm việc */}
+              <div className="p-3.5 bg-rose-50/50 border border-rose-200 rounded-xl flex items-center justify-between gap-3">
+                <div>
+                  <label htmlFor="modal_is_hidden" className="text-sm font-bold text-slate-800 block cursor-pointer">
+                    Ẩn nhân viên này trên lịch làm việc
+                  </label>
+                  <p className="text-xs text-slate-500">
+                    Khi tick chọn, nhân viên này sẽ không hiển thị trên bảng lịch tuần. Tùy chọn này được ghi nhớ vĩnh viễn.
+                  </p>
+                </div>
+                <input 
+                  type="checkbox" 
+                  id="modal_is_hidden"
+                  checked={Boolean(formData.is_hidden)} 
+                  onChange={e => setFormData({...formData, is_hidden: e.target.checked})} 
+                  className="w-5 h-5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer accent-rose-600 shrink-0" 
+                />
               </div>
               
               <div className="pt-4 flex justify-end gap-3">

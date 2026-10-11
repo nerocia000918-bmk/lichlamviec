@@ -6,4 +6,5 @@ export interface User {
   name: string;
   department: string;
   role: Role;
+  is_hidden?: boolean;
 }
