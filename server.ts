@@ -43,6 +43,22 @@ function saveSettingsToFile(key: string, value: string) {
     }
     settings[key] = value;
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+
+    // Also persist GOOGLE_SHEETS_URL into .env file
+    if (key === 'GOOGLE_SHEETS_URL' && value) {
+      try {
+        let envContent = '';
+        if (fs.existsSync('.env')) {
+          envContent = fs.readFileSync('.env', 'utf-8');
+        }
+        if (envContent.includes('GOOGLE_SHEETS_URL=')) {
+          envContent = envContent.replace(/GOOGLE_SHEETS_URL=.*/g, `GOOGLE_SHEETS_URL=${value}`);
+        } else {
+          envContent = (envContent ? envContent.trim() + '\n' : '') + `GOOGLE_SHEETS_URL=${value}\n`;
+        }
+        fs.writeFileSync('.env', envContent, 'utf-8');
+      } catch (err) {}
+    }
   } catch (e) {
     console.error('Could not write server_settings.json:', e);
   }
@@ -406,6 +422,14 @@ async function loadFromGoogleSheets() {
             }
             if (!joinedDate && persistence) joinedDate = persistence.joined_date || persistence.start_date;
             if (!resignedDate && persistence) resignedDate = persistence.resigned_date || persistence.end_date;
+
+            // Bổ sung khôi phục từ fileStore nếu persistence chưa kịp có
+            try {
+              const diskStore = loadEmployeeDatesFromFile();
+              const diskEntry = (e.code && diskStore[e.code]) ? diskStore[e.code] : (e.name ? Object.values(diskStore).find(d => d.name === e.name) : null);
+              if (!joinedDate && diskEntry?.start_date) joinedDate = diskEntry.start_date;
+              if (!resignedDate && diskEntry?.end_date) resignedDate = diskEntry.end_date;
+            } catch (errDisk) {}
             
             // Cập nhật lại persistence
             if (joinedDate || resignedDate) {
@@ -1421,6 +1445,53 @@ async function startServer() {
   app.get('/api/settings', (req, res) => {
     const settings = db.prepare('SELECT * FROM settings').all();
     res.json(settings);
+  });
+
+  app.get('/api/config/sheets', (req, res) => {
+    try {
+      const url = getGoogleSheetsUrl() || '';
+      const empCount = (db.prepare('SELECT COUNT(*) as c FROM employees').get() as { c: number })?.c || 0;
+      const schedCount = (db.prepare('SELECT COUNT(*) as c FROM schedules').get() as { c: number })?.c || 0;
+      res.json({
+        url,
+        connected: !!url,
+        employeesCount: empCount,
+        schedulesCount: schedCount
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/config/sheets', async (req, res) => {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ success: false, error: 'URL Google Sheets không được để trống' });
+    }
+    const cleanUrl = url.trim();
+    try {
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('GOOGLE_SHEETS_URL', cleanUrl);
+      saveSettingsToFile('GOOGLE_SHEETS_URL', cleanUrl);
+
+      const syncResult = await loadFromGoogleSheets();
+      const empCount = (db.prepare('SELECT COUNT(*) as c FROM employees').get() as { c: number })?.c || 0;
+      const schedCount = (db.prepare('SELECT COUNT(*) as c FROM schedules').get() as { c: number })?.c || 0;
+
+      io?.emit('settings:updated');
+      io?.emit('employees:updated');
+      io?.emit('schedules:updated');
+
+      res.json({
+        success: true,
+        message: 'Đã lưu liên kết và nạp dữ liệu thành công!',
+        url: cleanUrl,
+        employeesCount: empCount,
+        schedulesCount: schedCount,
+        syncResult
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Lỗi đồng bộ Google Sheets: ' + err.message });
+    }
   });
 
   app.post('/api/settings', (req, res) => {

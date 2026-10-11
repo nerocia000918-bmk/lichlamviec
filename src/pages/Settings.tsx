@@ -32,20 +32,31 @@ export default function Settings({
   const [editingShift, setEditingShift] = useState<any>(null);
 
   useEffect(() => {
-    if (role === 'Admin') {
-      fetch('/api/settings')
-        .then(res => res.json())
-        .then(data => {
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
           const sheetUrl = data.find((s: any) => s.key === 'GOOGLE_SHEETS_URL');
-          if (sheetUrl) setUrl(sheetUrl.value);
+          if (sheetUrl && sheetUrl.value) setUrl(sheetUrl.value);
+          else {
+            const local = localStorage.getItem('GOOGLE_SHEETS_URL');
+            if (local) setUrl(local);
+          }
           const tlLock = data.find((s: any) => s.key === 'TL_EDIT_LOCK_HOURS');
           if (tlLock) setTlLockHours(tlLock.value);
-        });
-      
-      fetch('/api/shifts')
-        .then(res => res.json())
-        .then(data => setShifts(data));
-    }
+        }
+      })
+      .catch(() => {
+        const local = localStorage.getItem('GOOGLE_SHEETS_URL');
+        if (local) setUrl(local);
+      });
+    
+    fetch('/api/shifts')
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setShifts(data);
+      })
+      .catch(() => {});
   }, [role]);
 
   const handleCopyCode = async () => {
@@ -94,11 +105,12 @@ export default function Settings({
   const handleSave = async () => {
     setStatus('saving');
     try {
+      localStorage.setItem('GOOGLE_SHEETS_URL', url.trim());
       await Promise.all([
-        fetch('/api/settings', {
+        fetch('/api/config/sheets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: 'GOOGLE_SHEETS_URL', value: url.trim() })
+          body: JSON.stringify({ url: url.trim() })
         }),
         fetch('/api/settings', {
           method: 'POST',
@@ -278,71 +290,73 @@ export default function Settings({
         </div>
       </div>
 
+      {/* Kết nối Google Sheets: Hiển thị cho toàn bộ người dùng để dễ dàng khôi phục / kết nối lại dữ liệu */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 mb-1">Kết nối Google Sheets</h2>
+            <p className="text-sm text-slate-500">
+              Tự động đồng bộ 2 chiều dữ liệu nhân viên, lịch làm việc và bảo vệ các cột start_date, end_date.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+            <button 
+              onClick={handleSync}
+              disabled={syncStatus === 'syncing' || !url}
+              className="flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
+              title="Tải toàn bộ dữ liệu từ Google Sheet về ứng dụng"
+            >
+              <RefreshCw className={clsx("w-4 h-4", syncStatus === 'syncing' && "animate-spin")} />
+              {syncStatus === 'syncing' ? 'Đang tải...' : 'Tải từ Sheet'}
+            </button>
+            <button 
+              onClick={handleSyncToSheets}
+              disabled={syncUpStatus === 'syncing' || !url}
+              className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 shadow-sm flex-1 sm:flex-initial"
+              title="Đẩy dữ liệu và ngày làm việc mới nhất từ ứng dụng lên Google Sheet"
+            >
+              <UploadCloud className={clsx("w-4 h-4", syncUpStatus === 'syncing' && "animate-pulse")} />
+              {syncUpStatus === 'syncing' ? 'Đang đồng bộ...' : 'Đồng bộ lên Sheet'}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Web App URL</label>
+            <input 
+              type="text" 
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://script.google.com/macros/s/.../exec"
+              className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-mono text-sm"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              {status === 'success' && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã lưu thành công!</span>}
+              {status === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Có lỗi xảy ra khi lưu.</span>}
+              {syncStatus === 'success' && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã tải dữ liệu từ Sheet!</span>}
+              {syncStatus === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Lỗi khi tải từ Sheet.</span>}
+              {syncUpStatus === 'success' && <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã đồng bộ lên Sheet thành công!</span>}
+              {syncUpStatus === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Lỗi khi đẩy lên Sheet.</span>}
+            </div>
+            <button 
+              onClick={handleSave}
+              disabled={status === 'saving'}
+              className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50 ml-auto"
+            >
+              <Save className="w-4 h-4" />
+              {status === 'saving' ? 'Đang lưu...' : 'Lưu cài đặt'}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Admin Only Settings */}
       {role === 'Admin' && (
         <>
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 mb-1">Kết nối Google Sheets</h2>
-                <p className="text-sm text-slate-500">
-                  Tự động đồng bộ 2 chiều dữ liệu nhân viên, lịch làm việc và bảo vệ các cột start_date, end_date.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                <button 
-                  onClick={handleSync}
-                  disabled={syncStatus === 'syncing' || !url}
-                  className="flex items-center justify-center gap-2 bg-slate-100 text-slate-700 px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50 flex-1 sm:flex-initial"
-                  title="Tải toàn bộ dữ liệu từ Google Sheet về ứng dụng"
-                >
-                  <RefreshCw className={clsx("w-4 h-4", syncStatus === 'syncing' && "animate-spin")} />
-                  {syncStatus === 'syncing' ? 'Đang tải...' : 'Tải từ Sheet'}
-                </button>
-                <button 
-                  onClick={handleSyncToSheets}
-                  disabled={syncUpStatus === 'syncing' || !url}
-                  className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 shadow-sm flex-1 sm:flex-initial"
-                  title="Đẩy dữ liệu và ngày làm việc mới nhất từ ứng dụng lên Google Sheet"
-                >
-                  <UploadCloud className={clsx("w-4 h-4", syncUpStatus === 'syncing' && "animate-pulse")} />
-                  {syncUpStatus === 'syncing' ? 'Đang đồng bộ...' : 'Đồng bộ lên Sheet'}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Web App URL</label>
-                <input 
-                  type="text" 
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-mono text-sm"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  {status === 'success' && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã lưu thành công!</span>}
-                  {status === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Có lỗi xảy ra khi lưu.</span>}
-                  {syncStatus === 'success' && <span className="text-green-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã tải dữ liệu từ Sheet!</span>}
-                  {syncStatus === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Lỗi khi tải từ Sheet.</span>}
-                  {syncUpStatus === 'success' && <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Đã đồng bộ lên Sheet thành công!</span>}
-                  {syncUpStatus === 'error' && <span className="text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Lỗi khi đẩy lên Sheet.</span>}
-                </div>
-                <button 
-                  onClick={handleSave}
-                  disabled={status === 'saving'}
-                  className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50 ml-auto"
-                >
-                  <Save className="w-4 h-4" />
-                  {status === 'saving' ? 'Đang lưu...' : 'Lưu cài đặt'}
-                </button>
-              </div>
-            </div>
-          </div>
 
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
             <div className="flex items-center gap-4 mb-6">

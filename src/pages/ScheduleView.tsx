@@ -1,10 +1,11 @@
 import { toPng } from 'html-to-image';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { format, addDays, startOfWeek, subWeeks, isBefore, addHours, parseISO, isSameDay } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import { User, socket } from '../App';
-import { ChevronLeft, ChevronRight, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, X, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Lock, Search, Filter, Calendar as CalendarIcon, Camera, Info, X, Trash2, Settings, RefreshCw, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
 
 interface Employee {
@@ -489,6 +490,28 @@ export default function ScheduleView({ user }: { user: User | null }) {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Banner cảnh báo & liên kết kết nối Google Sheet khi chưa có dữ liệu */}
+      {employees.length <= 1 && (
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in duration-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-xl flex items-center justify-center shrink-0">
+              <AlertCircle className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <h4 className="font-bold text-slate-800 text-sm">Chưa có dữ liệu nhân viên & lịch làm việc</h4>
+              <p className="text-xs text-slate-600 mt-0.5">Máy chủ vừa khởi động lại hoặc chưa nạp Google Sheets. Hãy dán link Web App để kết nối lại.</p>
+            </div>
+          </div>
+          <Link
+            to="/settings"
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm shrink-0 active:scale-95"
+          >
+            <Settings className="w-4 h-4" />
+            <span>Mở Cài đặt / Kết nối Sheet ngay</span>
+          </Link>
         </div>
       )}
 

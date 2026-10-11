@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { socket } from '../socket';
 import { Role } from '../types';
 import { Search, UserPlus, Edit2, Trash2, Calendar, Download, RefreshCw, CheckCircle2 } from 'lucide-react';
+import clsx from 'clsx';
 
 interface Employee {
   id: number;
